@@ -37,9 +37,15 @@ def print_hdf5_tree(name, obj, prefix="", is_last=True):
             extension = "    " if is_last else "│   "
             print_hdf5_tree(f"{name}/{key}", value, prefix + extension, is_last_item)
 
-with h5py.File(h5_path, 'r') as f:
-    print("HDF5 file structure")
+# Check structure of element_weights.h5
+element_weights_path = os.path.join(os.path.dirname(__file__), '..', 'element_weights', 'element_weights.h5')
+with h5py.File(element_weights_path, 'r') as f:
+    print(f"\nHDF5 file structure: {element_weights_path}")
     print("=" * 50)
     for key in f.keys():
         print_hdf5_tree(key, f[key], "", True)
     print("=" * 50)
+    # Also print attributes
+    print("\nFile attributes:")
+    for attr_name, attr_value in f.attrs.items():
+        print(f"  {attr_name}: {attr_value}")

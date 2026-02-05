@@ -20,6 +20,7 @@ import pandas as pd
 import sqlite3
 import os
 import sys
+import h5py
 
 # Add Source directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'Source'))
@@ -291,8 +292,8 @@ def save_results(weight_spectra: np.ndarray,
             f.create_group('measurements')
             f.create_group('measurements/Measurement_1')
             f.create_group('measurements/Measurement_1/libs')
-            f.create_group('measurements/Measurement_1/libs/data')
             f.create_group('measurements/Measurement_1/libs/metadata')
+            f.create_group('measurements/Measurement_1/global_metadata')
             # Save element names as fixed-length ASCII strings (compatible with all h5py versions)
             elements_encoded = np.array(elements, dtype='S10')  # Max 10 chars per element name
             f.create_dataset('measurements/Measurement_1/libs/metadata/elements', data=elements_encoded)
@@ -303,6 +304,12 @@ def save_results(weight_spectra: np.ndarray,
             f.create_dataset('measurements/Measurement_1/libs/metadata/concentration', data=CONCENTRATION)
             f.create_dataset('measurements/Measurement_1/libs/metadata/optical_path_length', data=OPTICAL_PATH_LENGTH)
             f.create_dataset('measurements/Measurement_1/libs/metadata/number_density', data=NUMBER_DENSITY)
+            f.create_dataset('measurements/Measurement_1/libs/metadata/x', data=0)
+            f.create_dataset('measurements/Measurement_1/libs/metadata/y', data=0)
+            f.create_dataset('measurements/Measurement_1/libs/metadata/z', data=0)
+            f.create_dataset('measurements/Measurement_1/global_metadata/Width Spacing', data=0)
+            f.create_dataset('measurements/Measurement_1/global_metadata/Height Spacing', data=0)
+            
         print(f"Combined HDF5 file saved to: {h5_path}")
     except ImportError:
         print("h5py not available, skipping HDF5 output")
