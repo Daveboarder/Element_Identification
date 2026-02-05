@@ -32,10 +32,10 @@ DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'Source', 'LIBS_data.db'
 # Number of synthetic samples to generate
 N_SAMPLES = 100
 
-# Wavelength range for spectra (in nm)
-WAVELENGTH_MIN = 200.0
-WAVELENGTH_MAX = 900.0
-WAVELENGTH_STEP = 0.01  # nm resolution
+#read sample wavelengths from h5 file
+file_path = '/home/LIBS/prochazka/data/Running_projects/25_0069_3D_chemical_imaging/Measurements/mandible 266nm/mandible_266_v1.h5'
+with h5py.File(file_path, 'r') as file:
+    wavelength = file['measurements/Measurement_1/libs/calibration'][:]
 
 # Plasma temperature range (Kelvin)
 TE_MIN = 8000
@@ -360,9 +360,6 @@ if __name__ == "__main__":
     
     # 4. Create wavelength array
     print("\n4. Creating wavelength array...")
-    wavelength = np.arange(WAVELENGTH_MIN, WAVELENGTH_MAX, WAVELENGTH_STEP)
-    print(f"   Wavelength range: {WAVELENGTH_MIN} - {WAVELENGTH_MAX} nm")
-    print(f"   Resolution: {WAVELENGTH_STEP} nm ({len(wavelength)} points)")
     
     # 5. Generate synthetic spectra
     print("\n5. Generating synthetic spectra...")
