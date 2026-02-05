@@ -288,17 +288,21 @@ def save_results(weight_spectra: np.ndarray,
         import h5py
         h5_path = os.path.join(output_subdir, 'element_weights.h5')
         with h5py.File(h5_path, 'w') as f:
-            f.create_dataset('weight_spectra', data=weight_spectra)
-            f.create_dataset('wavelength', data=wavelength)
-            # Save element names as string array
-            dt = h5py.special_dtype(vlen=str)
-            f.create_dataset('elements', data=elements, dtype=dt)
-            # Save plasma parameters as attributes
-            f.attrs['Te'] = Te
-            f.attrs['Ne'] = Ne
-            f.attrs['concentration'] = CONCENTRATION
-            f.attrs['optical_path_length'] = OPTICAL_PATH_LENGTH
-            f.attrs['number_density'] = NUMBER_DENSITY
+            f.create_group('measurements')
+            f.create_group('measurements/Measurement_1')
+            f.create_group('measurements/Measurement_1/libs')
+            f.create_group('measurements/Measurement_1/libs/data')
+            f.create_group('measurements/Measurement_1/libs/metadata')
+            # Save element names as fixed-length ASCII strings (compatible with all h5py versions)
+            elements_encoded = np.array(elements, dtype='S10')  # Max 10 chars per element name
+            f.create_dataset('measurements/Measurement_1/libs/metadata/elements', data=elements_encoded)
+            f.create_dataset('measurements/Measurement_1/libs/data', data=weight_spectra)
+            f.create_dataset('measurements/Measurement_1/libs/calibration', data=wavelength)
+            f.create_dataset('measurements/Measurement_1/libs/metadata/Te', data=Te)
+            f.create_dataset('measurements/Measurement_1/libs/metadata/Ne', data=Ne)
+            f.create_dataset('measurements/Measurement_1/libs/metadata/concentration', data=CONCENTRATION)
+            f.create_dataset('measurements/Measurement_1/libs/metadata/optical_path_length', data=OPTICAL_PATH_LENGTH)
+            f.create_dataset('measurements/Measurement_1/libs/metadata/number_density', data=NUMBER_DENSITY)
         print(f"Combined HDF5 file saved to: {h5_path}")
     except ImportError:
         print("h5py not available, skipping HDF5 output")
