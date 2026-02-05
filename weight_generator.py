@@ -24,7 +24,7 @@ import h5py
 
 # Add Source directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'Source'))
-from SpectraGenerator import create_spectra
+from SpectraGenerator import create_spectra  # type: ignore[import-not-found]
 
 # ============================================================================
 # Configuration
@@ -307,6 +307,8 @@ def save_results(weight_spectra: np.ndarray,
             f.create_dataset('measurements/Measurement_1/libs/metadata/x', data=0)
             f.create_dataset('measurements/Measurement_1/libs/metadata/y', data=0)
             f.create_dataset('measurements/Measurement_1/libs/metadata/z', data=0)
+            f.create_dataset('measurements/Measurement_1/libs/metadata/X_pos', data=0)
+            f.create_dataset('measurements/Measurement_1/libs/metadata/Y_pos', data=0)
             f.create_dataset('measurements/Measurement_1/global_metadata/Width Spacing', data=0)
             f.create_dataset('measurements/Measurement_1/global_metadata/Height Spacing', data=0)
             
