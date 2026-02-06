@@ -75,6 +75,14 @@ def load_weight_spectra():
 
 def load_input_spectra(h5_path):
     """Load spectra from input H5 file."""
+    # Check if file exists first
+    if not os.path.exists(h5_path):
+        print(f"\nERROR: File not found: {h5_path}")
+        print("\nPlease check:")
+        print("  1. The file path is correct (check uppercase/lowercase)")
+        print("  2. The file exists")
+        sys.exit(1)
+    
     common_paths = [
         'measurements/Measurement_1/libs/data',
         'data',

@@ -34,7 +34,7 @@ DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'Source', 'LIBS_data.db'
 N_SAMPLES = 100
 
 #read sample wavelengths from h5 file
-file_path = '/home/LIBS/prochazka/data/Running_projects/25_0069_3D_chemical_imaging/Measurements/mandible 266nm/mandible_266_v1.h5'
+file_path = '/mnt/data/projects/Running_projects/26_0128_Element_Identification/Data/FG_OBSIDIAN.h5'
 with h5py.File(file_path, 'r') as file:
     wavelength = file['measurements/Measurement_1/libs/calibration'][:]
 
