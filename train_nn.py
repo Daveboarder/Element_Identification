@@ -379,25 +379,78 @@ def evaluate_model(predict_fn, X_test, y_test, element_names):
     return y_pred
 
 
-def print_all_77_predictions(predict_fn, X_sample, element_names):
-    """Print predictions for all 77 elements for a single sample."""
+def print_all_77_predictions(predict_fn, X_sample, y_true, element_names, sample_idx=0):
+    """
+    Print predictions for all 77 elements for a single sample with ground truth.
+    
+    Parameters
+    ----------
+    predict_fn : callable
+        Prediction function
+    X_sample : np.ndarray
+        Single sample features
+    y_true : np.ndarray
+        Ground truth for this sample (77 values)
+    element_names : list
+        List of element names
+    sample_idx : int
+        Index of the sample being displayed
+    """
     y_pred = predict_fn(X_sample.reshape(1, -1))[0]
     
-    print("\n" + "=" * 70)
-    print("ALL 77 ELEMENTS PREDICTION (0 = not present, 1 = present)")
-    print("=" * 70)
+    print("\n" + "=" * 80)
+    print(f"ALL 77 ELEMENTS - SAMPLE #{sample_idx + 1}")
+    print("=" * 80)
     
-    # Sort by probability
+    # Show ground truth elements
+    true_elements = [element_names[i] for i in range(len(element_names)) if y_true[i] > 0.5]
+    print(f"\nGround Truth Elements: {true_elements}")
+    print(f"Number of elements present: {len(true_elements)}")
+    
+    # Sort by probability (descending)
     sorted_idx = np.argsort(y_pred)[::-1]
     
-    print(f"\n{'Element':<8} {'Probability':<12} {'Status'}")
-    print("-" * 35)
+    print(f"\n{'Element':<8} {'Prediction':<12} {'Ground Truth':<14} {'Status':<12} {'Match'}")
+    print("-" * 65)
+    
+    correct = 0
+    total = len(element_names)
     
     for idx in sorted_idx:
         elem = element_names[idx]
         prob = y_pred[idx]
-        status = "PRESENT" if prob > 0.5 else "absent"
-        print(f"{elem:<8} {prob:<12.4f} {status}")
+        truth = y_true[idx]
+        
+        pred_status = "PRESENT" if prob > 0.5 else "absent"
+        truth_status = "PRESENT" if truth > 0.5 else "absent"
+        
+        # Check if prediction matches ground truth
+        pred_binary = 1 if prob > 0.5 else 0
+        truth_binary = 1 if truth > 0.5 else 0
+        match = "✓" if pred_binary == truth_binary else "✗"
+        
+        if pred_binary == truth_binary:
+            correct += 1
+        
+        print(f"{elem:<8} {prob:<12.4f} {truth:<14.1f} {pred_status:<12} {match}")
+    
+    print("-" * 65)
+    print(f"\nSample Accuracy: {correct}/{total} = {correct/total:.2%}")
+    
+    # Summary of mismatches
+    mismatches = []
+    for idx in range(len(element_names)):
+        pred_binary = 1 if y_pred[idx] > 0.5 else 0
+        truth_binary = 1 if y_true[idx] > 0.5 else 0
+        if pred_binary != truth_binary:
+            mismatches.append((element_names[idx], y_pred[idx], y_true[idx]))
+    
+    if mismatches:
+        print(f"\nMismatches ({len(mismatches)}):")
+        for elem, pred, truth in mismatches:
+            print(f"  {elem}: predicted {pred:.4f}, truth {truth:.1f}")
+    else:
+        print("\nNo mismatches - Perfect prediction!")
     
     return {elem: float(y_pred[i]) for i, elem in enumerate(element_names)}
 
@@ -489,8 +542,8 @@ if __name__ == "__main__":
     # Evaluate
     predictions = evaluate_model(predict_fn, X_test_norm, y_test, weight_elements)
     
-    # Print all 77 element predictions for first test sample
-    result_dict = print_all_77_predictions(predict_fn, X_test_norm[0], weight_elements)
+    # Print all 77 element predictions for first test sample with ground truth
+    print_all_77_predictions(predict_fn, X_test_norm[0], y_test[0], weight_elements, sample_idx=0)
     
     # Final summary
     print("\n" + "=" * 70)
