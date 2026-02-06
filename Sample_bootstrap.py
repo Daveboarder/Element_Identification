@@ -69,7 +69,7 @@ SAMPLE_TYPES = [
     {
         'sample_id': 'MINERAL_001',
         'sample_name': 'Monazite',
-        'n_samples': 10,
+        'n_samples': 100,
         'concentration_ranges': {
             # Major elements for Monazite
             'Ce': (0.85, 0.98),
@@ -85,7 +85,7 @@ SAMPLE_TYPES = [
     {
         'sample_id': 'MINERAL_002',
         'sample_name': 'Bastnaesite',
-        'n_samples': 10,
+        'n_samples': 100,
         'concentration_ranges': {
             # Major elements for Bastnaesite (Ce-fluorocarbonate)
             'Ce': (0.2, 0.4),
@@ -100,9 +100,9 @@ SAMPLE_TYPES = [
     {
         'sample_id': 'MINERAL_003',
         'sample_name': 'Xenotime',
-        'n_samples': 10,
+        'n_samples': 100,
         'concentration_ranges': {
-            # Major elements for biological samples
+            # Major elements for minerals samples
             'Y': (0.46, 0.61),
             'P': (0.05, 0.2),
             'O': (0.001, 0.01),
@@ -113,6 +113,33 @@ SAMPLE_TYPES = [
             'Tb': (0.0, 0.00001),
             'Yb': (0.0, 0.0000001),
             'Lu': (0.0, 0.00000005),
+        }
+    },
+    {
+        'sample_id': 'MINERAL_004',
+        'sample_name': 'Obsidian_glass',
+        'n_samples': 100,
+        'concentration_ranges': {
+            # Major elements for biological samples
+            'Na': (0.005, 0.007),
+            'Mg': (0.012, 0.015),
+            'Al': (0.08, 0.09),
+            'Si': (0.25, 0.3),
+            'K': (0.05, 0.07),
+            'Ca': (0.045, 0.055),
+            'Fe': (0.025, 0.032),
+            'Ti': (0.004, 0.006),
+            # Trace elements
+            'Cr': (0.0, 0.0001),
+            'Ce': (0.0006, 0.0008),
+            'Y': (0.0002, 0.0005),
+            'Nd': (0.0003, 0.0006),
+            'Pr': (0.0001, 0.0002),
+            'Gd': (0.00004, 0.00007),
+            'Dy': (0.00002, 0.00004),
+            'Er': (0.00001, 0.00002),
+            'Yb': (0.000005, 0.000008),
+            'Lu': (0.000002, 0.000005),
         }
     },
 ]
