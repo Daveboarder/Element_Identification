@@ -1,0 +1,11 @@
+======================================================================
+Element Identification - Prediction
+======================================================================
+
+Loading weight spectra from: /mnt/data/projects/Running_projects/26_0128_Element_Identification/Methods/Element_Identification-1/element_weights/element_weights.h5
+  Shape: (77, 14905), Elements: 77
+
+Loading model from: /mnt/data/projects/Running_projects/26_0128_Element_Identification/Methods/Element_Identification-1/element_identification_model.pkl
+  Model loaded successfully
+
+Loading input spectra from: [--threshold

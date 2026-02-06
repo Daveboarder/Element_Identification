@@ -192,11 +192,16 @@ def save_to_csv(predictions, element_names, output_path, threshold=0.5):
 
 def main():
     # Parse arguments
-    if len(sys.argv) < 2:
+    if len(sys.argv) < 2 or sys.argv[1].startswith('-'):
         print("Usage: python predict_nn.py <input_h5_file> [--output file.csv] [--threshold 0.5]")
+        print("\nArguments:")
+        print("  input_h5_file     Path to H5 file containing spectra (required)")
+        print("  --output, -o      Output CSV file path (optional)")
+        print("  --threshold, -t   Detection threshold 0-1 (default: 0.5)")
         print("\nExample:")
         print("  python predict_nn.py synthetic_data.h5")
         print("  python predict_nn.py measurement.h5 --output results.csv")
+        print("  python predict_nn.py data.h5 --threshold 0.3 --output predictions.csv")
         sys.exit(1)
     
     input_file = sys.argv[1]
@@ -206,13 +211,19 @@ def main():
     # Parse optional arguments
     i = 2
     while i < len(sys.argv):
-        if sys.argv[i] in ['--output', '-o'] and i + 1 < len(sys.argv):
+        arg = sys.argv[i]
+        if arg in ['--output', '-o'] and i + 1 < len(sys.argv):
             output_file = sys.argv[i + 1]
             i += 2
-        elif sys.argv[i] in ['--threshold', '-t'] and i + 1 < len(sys.argv):
-            threshold = float(sys.argv[i + 1])
+        elif arg in ['--threshold', '-t'] and i + 1 < len(sys.argv):
+            try:
+                threshold = float(sys.argv[i + 1])
+            except ValueError:
+                print(f"Error: Invalid threshold value '{sys.argv[i + 1]}'. Must be a number.")
+                sys.exit(1)
             i += 2
         else:
+            print(f"Warning: Unknown argument '{arg}', ignoring.")
             i += 1
     
     print("=" * 70)
