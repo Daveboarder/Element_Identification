@@ -67,55 +67,52 @@ EXCLUDED_ELEMENTS = {'', 'n', 'r'}
 
 SAMPLE_TYPES = [
     {
-        'sample_id': 'STEEL_001',
-        'sample_name': 'Steel Alloy',
-        'n_samples': 50,
+        'sample_id': 'MINERAL_001',
+        'sample_name': 'Monazite',
+        'n_samples': 10,
         'concentration_ranges': {
-            # Major elements for steel
-            'Fe': (0.85, 0.98),
-            'C': (0.001, 0.02),
-            'Mn': (0.0, 0.02),
-            'Si': (0.0, 0.01),
-            'Cr': (0.0, 0.02),
-            'Ni': (0.0, 0.01),
+            # Major elements for Monazite
+            'Ce': (0.85, 0.98),
+            'La': (0.001, 0.02),
+            'Nd': (0.0, 0.02),
+            'P': (0.0, 0.02),
+            'O': (0.0, 0.01),
             # Trace elements
-            'Cu': (0.0, 0.005),
-            'Mo': (0.0, 0.005),
+            'Pr': (0.0, 0.005),
+            'Sm': (0.0, 0.005),
         }
     },
     {
-        'sample_id': 'ROCK_001',
-        'sample_name': 'Geological Rock Sample',
-        'n_samples': 50,
+        'sample_id': 'MINERAL_002',
+        'sample_name': 'Bastnaesite',
+        'n_samples': 10,
         'concentration_ranges': {
-            # Major elements for rocks/minerals
-            'Si': (0.2, 0.4),
-            'Al': (0.05, 0.15),
-            'Fe': (0.02, 0.1),
-            'Ca': (0.01, 0.15),
-            'Mg': (0.01, 0.1),
-            'Na': (0.01, 0.05),
-            'K': (0.01, 0.05),
+            # Major elements for Bastnaesite (Ce-fluorocarbonate)
+            'Ce': (0.2, 0.4),
+            'La': (0.05, 0.15),
+            'C': (0.02, 0.1),
+            'O': (0.01, 0.15),
+            'F': (0.01, 0.1),
             # Trace elements
-            'Ti': (0.0, 0.01),
-            'Mn': (0.0, 0.005),
+            'Sm': (0.0, 0.01),
         }
     },
     {
-        'sample_id': 'BIO_001',
-        'sample_name': 'Biological Tissue',
-        'n_samples': 50,
+        'sample_id': 'MINERAL_003',
+        'sample_name': 'Xenotime',
+        'n_samples': 10,
         'concentration_ranges': {
             # Major elements for biological samples
-            'Ca': (0.1, 0.4),
+            'Y': (0.46, 0.61),
             'P': (0.05, 0.2),
-            'Mg': (0.001, 0.01),
-            'Na': (0.001, 0.01),
-            'K': (0.001, 0.01),
+            'O': (0.001, 0.01),
             # Trace elements
-            'Fe': (0.0, 0.001),
-            'Zn': (0.0, 0.0005),
-            'Cu': (0.0, 0.0001),
+            'Dy': (0.0, 0.001),
+            'Er': (0.0, 0.0005),
+            'Gd': (0.0, 0.00005),
+            'Tb': (0.0, 0.00001),
+            'Yb': (0.0, 0.0000001),
+            'Lu': (0.0, 0.00000005),
         }
     },
 ]
