@@ -101,7 +101,8 @@ def load_synthetic_data():
         spectra = f['measurements/Measurement_1/libs/data'][:]
         concentrations = f['measurements/Measurement_1/libs/metadata/concentrations'][:]
         synth_elements = [e.decode('utf-8') for e in f['measurements/Measurement_1/libs/metadata/elements'][:]]
-    
+    #Normalize spectra from 0 to 1 using min-max scaling applied to each row
+    spectra = (spectra - np.min(spectra, axis=1, keepdims=True)) / (np.max(spectra, axis=1, keepdims=True) - np.min(spectra, axis=1, keepdims=True))
     print(f"  Spectra: {spectra.shape}")
     print(f"  Concentrations: {concentrations.shape}")
     print(f"  Elements ({len(synth_elements)}): {synth_elements}")
