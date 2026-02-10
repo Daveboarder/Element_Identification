@@ -137,12 +137,14 @@ def prepare_targets(concentrations, synth_elements, weight_elements, threshold=0
     for i, elem in enumerate(synth_elements):
         if elem in element_to_idx:
             idx = element_to_idx[elem]
-            targets[:, idx] = (concentrations[:, i] > threshold).astype(np.float32)
-            print(f"  {elem} -> index {idx}")
+            targets[:, idx] = concentrations[:, i]
+            if elem == 'K':
+                print(f"  {elem} -> {concentrations[:, i]}")
         else:
             print(f"  {elem} -> NOT FOUND!")
     
     print(f"\nTargets: {targets.shape}")
+    print(f"  Targets: {concentrations}")
     print(f"  Elements present per sample: {targets.sum(axis=1).mean():.2f} average")
     
     return targets
