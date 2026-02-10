@@ -72,14 +72,15 @@ SAMPLE_TYPES = [
         'n_samples': 100,
         'concentration_ranges': {
             # Major elements for Monazite
-            'Ce': (0.85, 0.98),
-            'La': (0.001, 0.02),
-            'Nd': (0.0, 0.02),
-            'P': (0.0, 0.02),
-            'O': (0.0, 0.01),
+            'Ce': (0.24, 0.31),
+            'La': (0.1445, 0.187),
+            'Nd': (0.051, 0.119),
+            'P': (0.5, 0.62),
+            'O': (0.1, 0.3),
             # Trace elements
-            'Pr': (0.0, 0.005),
+            'Pr': (0.0, 0.009),
             'Sm': (0.0, 0.005),
+            'Y': (0.0, 0.0032),
         }
     },
     {
@@ -88,13 +89,15 @@ SAMPLE_TYPES = [
         'n_samples': 100,
         'concentration_ranges': {
             # Major elements for Bastnaesite (Ce-fluorocarbonate)
-            'Ce': (0.2, 0.4),
-            'La': (0.05, 0.15),
-            'C': (0.02, 0.1),
-            'O': (0.01, 0.15),
-            'F': (0.01, 0.1),
+            'Ce': (0.41, 0.46),
+            'La': (0.28, 0.31),
+            'C': (0.2, 0.3),
+            'O': (0.1, 0.2),
+            'F': (0.2, 0.3),
             # Trace elements
-            'Sm': (0.0, 0.01),
+            'Sm': (0.0, 0.001),
+            'Nd': (0.1, 0.12),
+            'Pr': (0.034, 0.0425),
         }
     },
     {
@@ -103,20 +106,38 @@ SAMPLE_TYPES = [
         'n_samples': 100,
         'concentration_ranges': {
             # Major elements for minerals samples
-            'Y': (0.46, 0.61),
-            'P': (0.05, 0.2),
-            'O': (0.001, 0.01),
+            'Y': (0.39, 0.52),
+            'P': (0.2, 0.25),
+            'O': (0.01, 0.015),
             # Trace elements
-            'Dy': (0.0, 0.001),
-            'Er': (0.0, 0.0005),
-            'Gd': (0.0, 0.00005),
-            'Tb': (0.0, 0.00001),
-            'Yb': (0.0, 0.0000001),
-            'Lu': (0.0, 0.00000005),
+            'Dy': (0.034, 0.051),
+            'Er': (0.01, 0.012),
+            'Gd': (0.0085, 0.01),
+            'Tb': (0.004, 0.00642),
+            'Yb': (0.01, 0.012),
+            'Lu': (0.0002, 0.00025),
+            'Ho': (0.001, 0.0015),
         }
     },
     {
         'sample_id': 'MINERAL_004',
+        'sample_name': 'Parisite',
+        'n_samples': 100,
+        'concentration_ranges': {
+            # Major elements for minerals samples
+            'Ce': (0.24, 0.31),
+            'La': (0.1445, 0.187),
+            'Nd': (0.051, 0.119),
+            'F': (0.5, 0.62),
+            'O': (0.1, 0.3),
+            'C': (0.2, 0.3),
+            'Ca': (0.045, 0.055),
+            # Trace elements
+            'Pr': (0.008, 0.009),
+        }
+    },
+    {
+        'sample_id': 'MINERAL_005',
         'sample_name': 'Obsidian_glass',
         'n_samples': 100,
         'concentration_ranges': {
@@ -150,6 +171,13 @@ OPTICAL_PATH_LENGTH = 1.4e-04
 # Number density (cm^-3)
 NUMBER_DENSITY = 1e-4
 
+def unit_norm(vector: np.ndarray) -> np.ndarray:
+    """
+    Normalize a vector to have unit length.
+    """
+    vector = (vector - np.min(vector))
+    vector = vector / np.max(vector)
+    return vector
 
 def get_elements_from_database(db_path: str) -> list:
     """
@@ -352,7 +380,7 @@ def generate_synthetic_spectra(sample_table: pd.DataFrame,
                     if verbose:
                         print(f"  Warning: Could not generate spectrum for {elem}: {e}")
         
-        spectra[i] = spectrum
+        spectra[i] = unit_norm(spectrum)
     
     if verbose:
         print(f"Generated {n_samples} synthetic spectra.")

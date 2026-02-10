@@ -24,6 +24,7 @@ import sqlite3
 import os
 import sys
 import h5py
+from Sample_bootstrap import unit_norm
 
 # Add Source directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'Source'))
@@ -196,6 +197,9 @@ def generate_element_weights(elements: list,
                 C=concentration,
                 l=optical_path
             )
+            
+            #Normalize spectrum from 0 to 1 using min-max scaling applied to each row
+            spectrum = unit_norm(spectrum)
             spectra_list.append(spectrum)
             successful_elements.append(elem)
             

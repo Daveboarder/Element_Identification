@@ -52,7 +52,7 @@ LEARNING_RATE = 0.01
 EPOCHS = 1000
 BATCH_SIZE = 8
 TEST_SPLIT = 0.2
-RANDOM_SEED = 42
+RANDOM_SEED = 17
 
 np.random.seed(RANDOM_SEED)
 if USE_TORCH:
@@ -102,7 +102,6 @@ def load_synthetic_data():
         concentrations = f['measurements/Measurement_1/libs/metadata/concentrations'][:]
         synth_elements = [e.decode('utf-8') for e in f['measurements/Measurement_1/libs/metadata/elements'][:]]
     #Normalize spectra from 0 to 1 using min-max scaling applied to each row
-    spectra = (spectra - np.min(spectra, axis=1, keepdims=True)) / (np.max(spectra, axis=1, keepdims=True) - np.min(spectra, axis=1, keepdims=True))
     print(f"  Spectra: {spectra.shape}")
     print(f"  Concentrations: {concentrations.shape}")
     print(f"  Elements ({len(synth_elements)}): {synth_elements}")
@@ -408,7 +407,7 @@ def evaluate_model(predict_fn, X_test, y_test, element_names):
 
 
 def print_all_predictions(predict_fn, X_sample, y_true, element_names, sample_idx=0):
-    """Print predictions for all elements for a single sample with ground truth."""
+    """Print raw NN output probabilities for all elements with ground truth."""
     y_pred = predict_fn(X_sample.reshape(1, -1))[0]
     n = len(element_names)
     
@@ -421,34 +420,13 @@ def print_all_predictions(predict_fn, X_sample, y_true, element_names, sample_id
     print(f"Number of elements present: {len(true_elements)}")
     
     sorted_idx = np.argsort(y_pred)[::-1]
-    print(f"\n{'Element':<8} {'Prediction':<12} {'Ground Truth':<14} {'Status':<12} {'Match'}")
-    print("-" * 65)
+    print(f"\n{'Element':<8} {'NN Output':<14} {'Ground Truth':<14}")
+    print("-" * 36)
     
-    correct = 0
     for idx in sorted_idx:
-        prob, truth = y_pred[idx], y_true[idx]
-        pred_b = 1 if prob > 0.5 else 0
-        truth_b = 1 if truth > 0.5 else 0
-        match = "✓" if pred_b == truth_b else "✗"
-        if pred_b == truth_b:
-            correct += 1
-        status = "PRESENT" if prob > 0.5 else "absent"
-        print(f"{element_names[idx]:<8} {prob:<12.4f} {truth:<14.1f} {status:<12} {match}")
+        print(f"{element_names[idx]:<8} {y_pred[idx]:<14.6f} {y_true[idx]:<14.1f}")
     
-    print("-" * 65)
-    print(f"\nSample Accuracy: {correct}/{n} = {correct/n:.2%}")
-    
-    mismatches = []
-    for idx in range(n):
-        if (1 if y_pred[idx] > 0.5 else 0) != (1 if y_true[idx] > 0.5 else 0):
-            mismatches.append((element_names[idx], y_pred[idx], y_true[idx]))
-    
-    if mismatches:
-        print(f"\nMismatches ({len(mismatches)}):")
-        for elem, pred, truth in mismatches:
-            print(f"  {elem}: predicted {pred:.4f}, truth {truth:.1f}")
-    else:
-        print("\nNo mismatches - Perfect prediction!")
+    print("-" * 36)
 
 
 # ============================================================================

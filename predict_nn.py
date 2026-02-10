@@ -22,6 +22,8 @@ import h5py
 import os
 import pickle
 import sys
+from Sample_bootstrap import unit_norm
+from LIBSmethods import movingMinimum
 
 # Try to import PyTorch
 try:
@@ -122,6 +124,10 @@ def load_input_spectra(h5_path):
         for path in common_paths:
             try:
                 spectra = f[path][:]
+                #Normalize spectra from 0 to 1 using min-max scaling applied to each row
+                #apply unit_norm function to each row of the spectra
+                spectra = np.apply_along_axis(unit_norm, 1, spectra)
+                spectra = np.apply_along_axis(movingMinimum, 1, spectra)
                 if spectra.ndim == 1:
                     spectra = spectra.reshape(1, -1)
                 return spectra, path
@@ -225,17 +231,15 @@ def print_spectrum_prediction(pred, element_names, spectrum_idx, threshold=0.5):
         print(f"{element_names[idx]:<8} {pred[idx]:<12.4f} {status}")
 
 
-def save_to_csv(predictions, element_names, output_path, threshold=0.5):
-    """Save predictions to CSV file."""
+def save_to_csv(predictions, element_names, output_path):
+    """Save raw prediction probabilities to CSV file (no threshold applied)."""
     with open(output_path, 'w') as f:
-        f.write('Spectrum_ID,' + ','.join(element_names) + ',Detected_Elements\n')
+        f.write('Spectrum_ID,' + ','.join(element_names) + '\n')
         for i in range(predictions.shape[0]):
-            pred = predictions[i]
-            detected = [element_names[j] for j in range(len(pred)) if pred[j] > threshold]
-            detected_str = ';'.join(detected) if detected else 'None'
-            probs = ','.join([f'{p:.4f}' for p in pred])
-            f.write(f'Spectrum_{i+1},{probs},{detected_str}\n')
+            probs = ','.join([f'{p:.6f}' for p in predictions[i]])
+            f.write(f'Spectrum_{i+1},{probs}\n')
     print(f"\nSaved predictions to: {output_path}")
+    print(f"  {predictions.shape[0]} spectra x {predictions.shape[1]} elements (raw probabilities)")
 
 
 # ============================================================================
@@ -327,7 +331,7 @@ def main():
     
     # Save to CSV if requested
     if output_file:
-        save_to_csv(predictions, weight_elements, output_file, threshold)
+        save_to_csv(predictions, weight_elements, output_file)
     
     # Full table for first spectrum
     print_spectrum_prediction(predictions[0], weight_elements, 0, threshold)
