@@ -150,6 +150,7 @@ SAMPLE_TYPES = [
             'Ca': (0.045, 0.055),
             'Fe': (0.025, 0.032),
             'Ti': (0.004, 0.006),
+            'O': (0.05, 0.06),
             # Trace elements
             'Cr': (0.0, 0.0001),
             'Ce': (0.0006, 0.0008),
@@ -161,6 +162,56 @@ SAMPLE_TYPES = [
             'Er': (0.00001, 0.00002),
             'Yb': (0.000005, 0.000008),
             'Lu': (0.000002, 0.000005),
+        }
+    },
+    {
+        'sample_id': 'MINERAL_006',
+        'sample_name': 'Pure_Ce',
+        'n_samples': 100,
+        'concentration_ranges': {
+            # Major elements for Bastnaesite (Ce-fluorocarbonate)
+            'Ce': (0.85, 1.0),
+            'O': (0.1, 0.15),
+        }
+    },
+    {
+        'sample_id': 'MINERAL_007',
+        'sample_name': 'Pure_La',
+        'n_samples': 100,
+        'concentration_ranges': {
+            # Major elements for Bastnaesite (Ce-fluorocarbonate)
+            'La': (0.85, 1.0),
+            'O': (0.1, 0.15),
+        }
+    },
+    {
+        'sample_id': 'MINERAL_008',
+        'sample_name': 'Pure_Nd',
+        'n_samples': 100,
+        'concentration_ranges': {
+            # Major elements for Bastnaesite (Ce-fluorocarbonate)
+            'Nd': (0.85, 1.0),
+            'O': (0.1, 0.15),
+        }
+    },
+    {
+        'sample_id': 'MINERAL_009',
+        'sample_name': 'Pure_Pr',
+        'n_samples': 100,
+        'concentration_ranges': {
+            # Major elements for Bastnaesite (Ce-fluorocarbonate)
+            'Pr': (0.85, 1.0),
+            'O': (0.1, 0.15),
+        }
+    },
+    {
+        'sample_id': 'MINERAL_010',
+        'sample_name': 'Pure_Sm',
+        'n_samples': 100,
+        'concentration_ranges': {
+            # Major elements for Bastnaesite (Ce-fluorocarbonate)
+            'Sm': (0.85, 1.0),
+            'O': (0.1, 0.15),
         }
     },
 ]
