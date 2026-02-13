@@ -21,18 +21,34 @@ obsidian = unit_norm(obsidian)
 obsidian = movingMinimum(obsidian)
 print(spectra.shape)
 unique_id = np.unique(sample_id)
-print(unique_id.shape)
-print(unique_id)
+
+# Build a mapping from sample_id -> sample_name (using first occurrence)
+id_to_name = {}
+for sid, sname in zip(sample_id, sample_name):
+    key = sid.decode('utf-8') if isinstance(sid, bytes) else str(sid)
+    if key not in id_to_name:
+        id_to_name[key] = sname.decode('utf-8') if isinstance(sname, bytes) else str(sname)
+
+print(f"Unique samples: {len(unique_id)}")
+for uid in unique_id:
+    k = uid.decode('utf-8') if isinstance(uid, bytes) else str(uid)
+    print(f"  {k} -> {id_to_name[k]}")
+
 #aggregate spectra by sample_id
 spectra_aggregated = np.zeros((len(unique_id), len(wavelength)))
 for i in range(len(unique_id)):
     spectra_aggregated[i,:] = np.mean(spectra[sample_id == unique_id[i],:], axis=0)
     spectra_aggregated[i,:] = unit_norm(spectra_aggregated[i,:])
+
+# Build paired labels list (correct order matching spectra_aggregated)
+labels = [id_to_name[uid.decode('utf-8') if isinstance(uid, bytes) else str(uid)] for uid in unique_id]
+
+# Append obsidian
 spectra_aggregated = np.vstack((spectra_aggregated, obsidian))
-unique_id = np.append(unique_id, 'OBSIDIAN')
+labels.append('OBSIDIAN')
+
 fig = go.Figure()
-for i in range(len(unique_id)):
-    # Decode unique_id to string for Plotly
-    name = unique_id[i].decode('utf-8') if isinstance(unique_id[i], bytes) else str(unique_id[i])
-    fig.add_trace(go.Scatter(x=wavelength, y=spectra_aggregated[i,:], mode='lines', name=name))
+for i in range(len(labels)):
+    fig.add_trace(go.Scatter(x=wavelength, y=spectra_aggregated[i,:], mode='lines', name=labels[i]))
 fig.show()
+
