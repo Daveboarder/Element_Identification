@@ -18,6 +18,7 @@ import sqlite3
 import os
 import sys
 import h5py
+from torch.utils.data import Dataset  # type: ignore[import-not-found]
 
 # Add Source directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'Source'))
@@ -197,8 +198,19 @@ def generate_sample_table(concentration_ranges: dict,
         data['sample_type_name'] = [sample_name] * n_samples
     
     # Create concentration data only for specified elements
-    for elem, (c_min, c_max) in concentration_ranges.items():
-        data[elem] = np.random.uniform(c_min, c_max, n_samples)
+    element_names = list(concentration_ranges.keys())
+    concentration_matrix = np.column_stack([
+        np.random.uniform(c_min, c_max, n_samples)
+        for c_min, c_max in concentration_ranges.values()
+    ])
+
+    # Normalize each sample (row) so concentrations sum to 1.0
+    row_sums = concentration_matrix.sum(axis=1, keepdims=True)
+    row_sums[row_sums == 0] = 1.0
+    concentration_matrix = concentration_matrix / row_sums
+
+    for idx, elem in enumerate(element_names):
+        data[elem] = concentration_matrix[:, idx]
     
     # Add plasma parameters
     data['Te'] = np.random.uniform(te_range[0], te_range[1], n_samples)
@@ -282,6 +294,96 @@ def generate_synthetic_spectra(sample_table: pd.DataFrame,
     return spectra
 
 
+class SyntheticLIBSDataset(Dataset):
+    """
+    PyTorch Dataset wrapper for synthetic LIBS sample generation.
+    """
+
+    def __init__(self,
+                 sample_types: list,
+                 wavelength: np.ndarray,
+                 db_path: str = DATABASE_PATH,
+                 te_range: tuple = (TE_MIN, TE_MAX),
+                 ne_range: tuple = (NE_MIN, NE_MAX),
+                 verbose: bool = True):
+        self.sample_types = sample_types
+        self.wavelength = wavelength
+        self.db_path = db_path
+        self.te_range = te_range
+        self.ne_range = ne_range
+        self.verbose = verbose
+        self.sample_table, self.spectra = self._generate_all()
+
+    def _generate_all(self) -> tuple[pd.DataFrame, np.ndarray]:
+        all_sample_tables = []
+        all_spectra = []
+
+        for i, sample_type in enumerate(self.sample_types):
+            sample_id = sample_type['sample_id']
+            sample_name = sample_type['sample_name']
+            n_samples = sample_type['n_samples']
+            concentration_ranges = sample_type['concentration_ranges']
+
+            if self.verbose:
+                print(f"\n{'='*70}")
+                print(f"Processing Sample Type {i+1}/{len(self.sample_types)}: {sample_name} ({sample_id})")
+                print(f"{'='*70}")
+
+                print(f"\n1. Validating elements for {sample_name}...")
+            try:
+                elements = validate_elements(concentration_ranges, self.db_path)
+                if self.verbose:
+                    print(f"   Using {len(elements)} elements: {', '.join(elements)}")
+            except ValueError as e:
+                print(f"   WARNING: Skipping {sample_name} - {e}")
+                continue
+
+            if self.verbose:
+                print(f"\n2. Concentration ranges for {sample_name}:")
+                for elem, (c_min, c_max) in concentration_ranges.items():
+                    print(f"   {elem}: {c_min*100:.3f}% - {c_max*100:.3f}%")
+
+                print(f"\n3. Generating {n_samples} samples for {sample_name}...")
+            sample_table = generate_sample_table(
+                concentration_ranges=concentration_ranges,
+                n_samples=n_samples,
+                sample_id=sample_id,
+                sample_name=sample_name,
+                te_range=self.te_range,
+                ne_range=self.ne_range,
+                random_seed=42 + i
+            )
+            if self.verbose:
+                print(f"   Generated {len(sample_table)} samples")
+                print(f"   Te range: {sample_table['Te'].min():.0f} - {sample_table['Te'].max():.0f} K")
+                print(f"   Ne range: {sample_table['Ne'].min():.2e} - {sample_table['Ne'].max():.2e} cm^-3")
+
+                print(f"\n4. Generating synthetic spectra for {sample_name}...")
+            spectra = generate_synthetic_spectra(
+                sample_table=sample_table,
+                wavelength=self.wavelength,
+                verbose=self.verbose
+            )
+
+            all_sample_tables.append(sample_table)
+            all_spectra.append(spectra)
+
+        if not all_sample_tables:
+            return pd.DataFrame(), np.empty((0, len(self.wavelength)))
+
+        combined_sample_table = pd.concat(all_sample_tables, ignore_index=True).fillna(0)
+        combined_spectra = np.vstack(all_spectra)
+        return combined_sample_table, combined_spectra
+
+    def __len__(self) -> int:
+        return len(self.sample_table)
+
+    def __getitem__(self, idx: int) -> dict:
+        row = self.sample_table.iloc[idx].to_dict()
+        row['spectrum'] = self.spectra[idx]
+        return row
+
+
 def save_results(sample_table: pd.DataFrame,
                  spectra: np.ndarray,
                  wavelength: np.ndarray,
@@ -302,78 +404,77 @@ def save_results(sample_table: pd.DataFrame,
     """
     if output_dir is None:
         output_dir = os.path.dirname(__file__)
-    
+    '''
     # Save sample table
     table_path = os.path.join(output_dir, 'sample_table.csv')
     sample_table.to_csv(table_path, index_label='sample_id')
     print(f"Sample table saved to: {table_path}")
+    '''
+    # Save spectra (disabled)
+    # spectra_path = os.path.join(output_dir, 'synthetic_spectra.npy')
+    # np.save(spectra_path, spectra)
+    # print(f"Spectra saved to: {spectra_path}")
     
-    # Save spectra
-    spectra_path = os.path.join(output_dir, 'synthetic_spectra.npy')
-    np.save(spectra_path, spectra)
-    print(f"Spectra saved to: {spectra_path}")
+    # Save wavelength array (disabled)
+    # wavelength_path = os.path.join(output_dir, 'wavelength.npy')
+    # np.save(wavelength_path, wavelength)
+    # print(f"Wavelength array saved to: {wavelength_path}")
     
-    # Save wavelength array
-    wavelength_path = os.path.join(output_dir, 'wavelength.npy')
-    np.save(wavelength_path, wavelength)
-    print(f"Wavelength array saved to: {wavelength_path}")
-    
-    # Save combined data as HDF5 for convenience
-    # Following the structure from weight_generator.py
-    try:
-        import h5py
-        h5_path = os.path.join(output_dir, 'synthetic_data.h5')
-        with h5py.File(h5_path, 'w') as f:
-            # Create group structure
-            f.create_group('measurements')
-            f.create_group('measurements/Measurement_1')
-            f.create_group('measurements/Measurement_1/libs')
-            f.create_group('measurements/Measurement_1/libs/metadata')
-            f.create_group('measurements/Measurement_1/libs/metadata/samples')
-            f.create_group('measurements/Measurement_1/global_metadata')
-            
-            # Main data
-            f.create_dataset('measurements/Measurement_1/libs/data', data=spectra)
-            f.create_dataset('measurements/Measurement_1/libs/calibration', data=wavelength)
-            
-            # Identify element columns vs metadata columns
-            non_element_cols = {'Te', 'Ne', 'sample_type_id', 'sample_type_name', 'unique_id'}
-            element_cols = [col for col in sample_table.columns if col not in non_element_cols]
-            
-            # Save element names
-            elements_encoded = np.array(element_cols, dtype='S10')
-            f.create_dataset('measurements/Measurement_1/libs/metadata/elements', data=elements_encoded)
-            
-            # Save sample metadata (per-sample arrays)
-            for col in sample_table.columns:
-                col_data = sample_table[col].values
-                # Handle string columns by encoding to bytes
-                if col_data.dtype == object or col_data.dtype.kind == 'U':
-                    col_data = np.array(col_data, dtype='S64')
-                f.create_dataset(f'measurements/Measurement_1/libs/metadata/samples/{col}', data=col_data)
-            
-            # Save element concentrations as a 2D array (n_samples x n_elements)
-            concentration_matrix = sample_table[element_cols].values
-            f.create_dataset('measurements/Measurement_1/libs/metadata/concentrations', data=concentration_matrix)
-            
-            # Save plasma parameters
-            f.create_dataset('measurements/Measurement_1/libs/metadata/Te', data=sample_table['Te'].values)
-            f.create_dataset('measurements/Measurement_1/libs/metadata/Ne', data=sample_table['Ne'].values)
-            
-            # Global metadata (placeholder values)
-            f.create_dataset('measurements/Measurement_1/libs/metadata/x', data=np.zeros(len(sample_table)))
-            f.create_dataset('measurements/Measurement_1/libs/metadata/y', data=np.zeros(len(sample_table)))
-            f.create_dataset('measurements/Measurement_1/libs/metadata/z', data=np.zeros(len(sample_table)))
-            f.create_dataset('measurements/Measurement_1/libs/metadata/X_pos', data=np.zeros(len(sample_table)))
-            f.create_dataset('measurements/Measurement_1/libs/metadata/Y_pos', data=np.zeros(len(sample_table)))
-            f.create_dataset('measurements/Measurement_1/global_metadata/Width Spacing', data=0)
-            f.create_dataset('measurements/Measurement_1/global_metadata/Height Spacing', data=0)
-            f.create_dataset('measurements/Measurement_1/global_metadata/optical_path_length', data=OPTICAL_PATH_LENGTH)
-            f.create_dataset('measurements/Measurement_1/global_metadata/number_density', data=NUMBER_DENSITY)
-            
-        print(f"Combined HDF5 file saved to: {h5_path}")
-    except ImportError:
-        print("h5py not available, skipping HDF5 output")
+    # Save combined data as HDF5 for convenience (disabled)
+    # try:
+    #     import h5py
+    #     h5_path = os.path.join(output_dir, 'synthetic_data.h5')
+    #     with h5py.File(h5_path, 'w') as f:
+    #         # Create group structure
+    #         f.create_group('measurements')
+    #         f.create_group('measurements/Measurement_1')
+    #         f.create_group('measurements/Measurement_1/libs')
+    #         f.create_group('measurements/Measurement_1/libs/metadata')
+    #         f.create_group('measurements/Measurement_1/libs/metadata/samples')
+    #         f.create_group('measurements/Measurement_1/global_metadata')
+    #
+    #         # Main data
+    #         f.create_dataset('measurements/Measurement_1/libs/data', data=spectra)
+    #         f.create_dataset('measurements/Measurement_1/libs/calibration', data=wavelength)
+    #
+    #         # Identify element columns vs metadata columns
+    #         non_element_cols = {'Te', 'Ne', 'sample_type_id', 'sample_type_name', 'unique_id'}
+    #         element_cols = [col for col in sample_table.columns if col not in non_element_cols]
+    #
+    #         # Save element names
+    #         elements_encoded = np.array(element_cols, dtype='S10')
+    #         f.create_dataset('measurements/Measurement_1/libs/metadata/elements', data=elements_encoded)
+    #
+    #         # Save sample metadata (per-sample arrays)
+    #         for col in sample_table.columns:
+    #             col_data = sample_table[col].values
+    #             # Handle string columns by encoding to bytes
+    #             if col_data.dtype == object or col_data.dtype.kind == 'U':
+    #                 col_data = np.array(col_data, dtype='S64')
+    #             f.create_dataset(f'measurements/Measurement_1/libs/metadata/samples/{col}', data=col_data)
+    #
+    #         # Save element concentrations as a 2D array (n_samples x n_elements)
+    #         concentration_matrix = sample_table[element_cols].values
+    #         f.create_dataset('measurements/Measurement_1/libs/metadata/concentrations', data=concentration_matrix)
+    #
+    #         # Save plasma parameters
+    #         f.create_dataset('measurements/Measurement_1/libs/metadata/Te', data=sample_table['Te'].values)
+    #         f.create_dataset('measurements/Measurement_1/libs/metadata/Ne', data=sample_table['Ne'].values)
+    #
+    #         # Global metadata (placeholder values)
+    #         f.create_dataset('measurements/Measurement_1/libs/metadata/x', data=np.zeros(len(sample_table)))
+    #         f.create_dataset('measurements/Measurement_1/libs/metadata/y', data=np.zeros(len(sample_table)))
+    #         f.create_dataset('measurements/Measurement_1/libs/metadata/z', data=np.zeros(len(sample_table)))
+    #         f.create_dataset('measurements/Measurement_1/libs/metadata/X_pos', data=np.zeros(len(sample_table)))
+    #         f.create_dataset('measurements/Measurement_1/libs/metadata/Y_pos', data=np.zeros(len(sample_table)))
+    #         f.create_dataset('measurements/Measurement_1/global_metadata/Width Spacing', data=0)
+    #         f.create_dataset('measurements/Measurement_1/global_metadata/Height Spacing', data=0)
+    #         f.create_dataset('measurements/Measurement_1/global_metadata/optical_path_length', data=OPTICAL_PATH_LENGTH)
+    #         f.create_dataset('measurements/Measurement_1/global_metadata/number_density', data=NUMBER_DENSITY)
+    #
+    #     print(f"Combined HDF5 file saved to: {h5_path}")
+    # except ImportError:
+    #     print("h5py not available, skipping HDF5 output")
 
 
 # ============================================================================
@@ -384,92 +485,40 @@ if __name__ == "__main__":
     print("=" * 70)
     print("Synthetic LIBS Spectra Generator - Multi-Sample Type Mode")
     print("=" * 70)
-    
-    # Lists to collect all samples and spectra
-    all_sample_tables = []
-    all_spectra = []
-    
-    # Process each sample type
-    for i, sample_type in enumerate(SAMPLE_TYPES):
-        sample_id = sample_type['sample_id']
-        sample_name = sample_type['sample_name']
-        n_samples = sample_type['n_samples']
-        concentration_ranges = sample_type['concentration_ranges']
-        
-        print(f"\n{'='*70}")
-        print(f"Processing Sample Type {i+1}/{len(SAMPLE_TYPES)}: {sample_name} ({sample_id})")
-        print(f"{'='*70}")
-        
-        # 1. Validate elements
-        print(f"\n1. Validating elements for {sample_name}...")
-        try:
-            elements = validate_elements(concentration_ranges, DATABASE_PATH)
-            print(f"   Using {len(elements)} elements: {', '.join(elements)}")
-        except ValueError as e:
-            print(f"   WARNING: Skipping {sample_name} - {e}")
-            continue
-        
-        # 2. Show concentration ranges
-        print(f"\n2. Concentration ranges for {sample_name}:")
-        for elem, (c_min, c_max) in concentration_ranges.items():
-            print(f"   {elem}: {c_min*100:.3f}% - {c_max*100:.3f}%")
-        
-        # 3. Generate sample table
-        print(f"\n3. Generating {n_samples} samples for {sample_name}...")
-        sample_table = generate_sample_table(
-            concentration_ranges=concentration_ranges,
-            n_samples=n_samples,
-            sample_id=sample_id,
-            sample_name=sample_name,
-            te_range=(TE_MIN, TE_MAX),
-            ne_range=(NE_MIN, NE_MAX),
-            random_seed=42 + i  # Different seed for each sample type
-        )
-        print(f"   Generated {len(sample_table)} samples")
-        print(f"   Te range: {sample_table['Te'].min():.0f} - {sample_table['Te'].max():.0f} K")
-        print(f"   Ne range: {sample_table['Ne'].min():.2e} - {sample_table['Ne'].max():.2e} cm^-3")
-        
-        # 4. Generate synthetic spectra
-        print(f"\n4. Generating synthetic spectra for {sample_name}...")
-        spectra = generate_synthetic_spectra(
-            sample_table=sample_table,
-            wavelength=wavelength,
-            verbose=True
-        )
-        
-        # Collect results
-        all_sample_tables.append(sample_table)
-        all_spectra.append(spectra)
-    
-    # Combine all sample tables and spectra
+
+    dataset = SyntheticLIBSDataset(
+        sample_types=SAMPLE_TYPES,
+        wavelength=wavelength,
+        db_path=DATABASE_PATH,
+        te_range=(TE_MIN, TE_MAX),
+        ne_range=(NE_MIN, NE_MAX),
+        verbose=True
+    )
+
+    combined_sample_table = dataset.sample_table
+    combined_spectra = dataset.spectra
+
     print(f"\n{'='*70}")
     print("Combining all sample types...")
     print(f"{'='*70}")
-    
-    if all_sample_tables:
-        # Combine sample tables (fill missing columns with 0 for elements)
-        combined_sample_table = pd.concat(all_sample_tables, ignore_index=True)
-        combined_sample_table = combined_sample_table.fillna(0)
-        
-        # Combine spectra
-        combined_spectra = np.vstack(all_spectra)
-        
+
+    if len(dataset) > 0:
         print(f"\nTotal samples generated: {len(combined_sample_table)}")
         print(f"Sample types: {combined_sample_table['sample_type_id'].nunique()}")
         for sample_id in combined_sample_table['sample_type_id'].unique():
             count = (combined_sample_table['sample_type_id'] == sample_id).sum()
             name = combined_sample_table[combined_sample_table['sample_type_id'] == sample_id]['sample_type_name'].iloc[0]
             print(f"   - {sample_id} ({name}): {count} samples")
-        
+
         # Save results
-        print("\nSaving combined results...")
-        save_results(combined_sample_table, combined_spectra, wavelength)
-        
+        #print("\nSaving combined results...")
+        #save_results(combined_sample_table, combined_spectra, wavelength)
+
         print("\n" + "=" * 70)
         print(f"Done! Generated synthetic LIBS spectra for {len(combined_sample_table)} total samples")
         print(f"Across {len(SAMPLE_TYPES)} sample types")
         print("=" * 70)
-        
+
         # Display summary statistics
         print("\nCombined Sample Table Summary:")
         print(combined_sample_table.describe())
