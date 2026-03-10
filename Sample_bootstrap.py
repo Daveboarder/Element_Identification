@@ -40,7 +40,7 @@ N_SAMPLES = 100
 
 #read sample wavelengths from json file
 file_path = '/mnt/data/projects/Running_projects/26_0128_Element_Identification/Methods/Element_Identification-1/Data/VASKUT K8.json'
-data, wavelength = get_spectra(file_path, run_id='1')
+data, wavelength = get_spectra(file_path, run_id=1)
 
 # Plasma temperature range (Kelvin)
 TE_MIN = 8000

@@ -29,19 +29,19 @@ from Sample_bootstrap import unit_norm
 # Add Source directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'Source'))
 from SpectraGenerator import create_spectra  # type: ignore[import-not-found]
+from readData import get_spectra
 
 # ============================================================================
 # Configuration
 # ============================================================================
 
 # Database path
-DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'Source', 'LIBS_data.db')
+DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'Source', 'LIBS_data_vacuum.db')
 
 # Read sample wavelength from h5 file
 # MODIFY THIS PATH to match your spectrometer / measurement setup
-file_path = '/mnt/data/projects/Running_projects/26_0128_Element_Identification/Data/FG_OBSIDIAN.h5'
-with h5py.File(file_path, 'r') as file:
-    wavelength = file['measurements/Measurement_1/libs/calibration'][:]
+file_path = '/mnt/data/projects/Running_projects/26_0128_Element_Identification/Methods/Element_Identification-1/Data/VASKUT K8.json'
+data, wavelength = get_spectra(file_path, run_id=1)
 
 # ----------------------------------------------------------------------------
 # Plasma Parameters (MODIFY THESE VALUES)
@@ -441,7 +441,7 @@ def save_multi_weights(weight_matrix: np.ndarray,
     # Derive unique elements (preserving order)
     unique_elements = list(dict.fromkeys(element_labels))
     
-    h5_path = os.path.join(output_subdir, 'multi_weights.h5')
+    h5_path = os.path.join(output_subdir, 'multi_weights_vacuum.h5')
     with h5py.File(h5_path, 'w') as f:
         f.create_dataset('weight_matrix', data=weight_matrix)
         f.create_dataset('wavelength', data=wavelength)
@@ -458,7 +458,7 @@ def save_multi_weights(weight_matrix: np.ndarray,
     print(f"  TE/NE combinations: {len(te_values) * len(ne_values)}")
     
     # Also save a CSV summary
-    csv_path = os.path.join(output_subdir, 'multi_weights_info.csv')
+    csv_path = os.path.join(output_subdir, 'multi_weights_info_vacuum.csv')
     info = pd.DataFrame({
         'element': element_labels,
         'Te': te_labels,
@@ -554,6 +554,6 @@ if __name__ == "__main__":
     print(f"  Wavelength points: {len(wavelength)}")
     print(f"  Output directory: element_weights/")
     print(f"  Files:")
-    print(f"    - multi_weights.h5  (for train_nn.py / predict_nn.py)")
+    print(f"    - multi_weights_vacuum.h5  (for train_nn.py / predict_nn.py)")
     print(f"    - element_weights.h5 (single TE/NE, backward compatible)")
     print("=" * 70)
