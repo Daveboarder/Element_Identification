@@ -18,26 +18,29 @@ import sqlite3
 import os
 import sys
 import h5py
+import torch
 from torch.utils.data import Dataset  # type: ignore[import-not-found]
 
 # Add Source directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'Source'))
 from SpectraGenerator import create_spectra  # type: ignore[import-not-found]
+from read_sample_types import load_sample_types_from_excel
+from readData import get_spectra
+
 
 # ============================================================================
 # Configuration
 # ============================================================================
 
 # Database path
-DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'Source', 'LIBS_data.db')
+DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'Source', 'LIBS_data_vacuum.db')
 
 # Number of synthetic samples to generate
 N_SAMPLES = 100
 
-#read sample wavelengths from h5 file
-file_path = '/mnt/data/projects/Running_projects/26_0128_Element_Identification/Data/FG_OBSIDIAN.h5'
-with h5py.File(file_path, 'r') as file:
-    wavelength = file['measurements/Measurement_1/libs/calibration'][:]
+#read sample wavelengths from json file
+file_path = '/mnt/data/projects/Running_projects/26_0128_Element_Identification/Methods/Element_Identification-1/Data/VASKUT K8.json'
+data, wavelength = get_spectra(file_path, run_id='1')
 
 # Plasma temperature range (Kelvin)
 TE_MIN = 8000
@@ -58,7 +61,7 @@ EXCLUDED_ELEMENTS = {'', 'n', 'r'}
 # different sample type sets without losing previous configurations.
 # ============================================================================
 
-from sample_types_config import SAMPLE_TYPES
+SAMPLE_TYPES = load_sample_types_from_excel()
 
 # Optical path length (cm)
 OPTICAL_PATH_LENGTH = 1.4e-04
@@ -384,98 +387,12 @@ class SyntheticLIBSDataset(Dataset):
         return row
 
 
-def save_results(sample_table: pd.DataFrame,
-                 spectra: np.ndarray,
-                 wavelength: np.ndarray,
-                 output_dir: str = None):
-    """
-    Save the sample table and spectra to files.
-    
-    Parameters
-    ----------
-    sample_table : pd.DataFrame
-        Table with element concentrations and plasma parameters
-    spectra : np.ndarray
-        Array of synthetic spectra
-    wavelength : np.ndarray
-        Wavelength array
-    output_dir : str, optional
-        Output directory (defaults to script directory)
-    """
-    if output_dir is None:
-        output_dir = os.path.dirname(__file__)
-    '''
-    # Save sample table
-    table_path = os.path.join(output_dir, 'sample_table.csv')
-    sample_table.to_csv(table_path, index_label='sample_id')
-    print(f"Sample table saved to: {table_path}")
-    '''
-    # Save spectra (disabled)
-    # spectra_path = os.path.join(output_dir, 'synthetic_spectra.npy')
-    # np.save(spectra_path, spectra)
-    # print(f"Spectra saved to: {spectra_path}")
-    
-    # Save wavelength array (disabled)
-    # wavelength_path = os.path.join(output_dir, 'wavelength.npy')
-    # np.save(wavelength_path, wavelength)
-    # print(f"Wavelength array saved to: {wavelength_path}")
-    
-    # Save combined data as HDF5 for convenience (disabled)
-    # try:
-    #     import h5py
-    #     h5_path = os.path.join(output_dir, 'synthetic_data.h5')
-    #     with h5py.File(h5_path, 'w') as f:
-    #         # Create group structure
-    #         f.create_group('measurements')
-    #         f.create_group('measurements/Measurement_1')
-    #         f.create_group('measurements/Measurement_1/libs')
-    #         f.create_group('measurements/Measurement_1/libs/metadata')
-    #         f.create_group('measurements/Measurement_1/libs/metadata/samples')
-    #         f.create_group('measurements/Measurement_1/global_metadata')
-    #
-    #         # Main data
-    #         f.create_dataset('measurements/Measurement_1/libs/data', data=spectra)
-    #         f.create_dataset('measurements/Measurement_1/libs/calibration', data=wavelength)
-    #
-    #         # Identify element columns vs metadata columns
-    #         non_element_cols = {'Te', 'Ne', 'sample_type_id', 'sample_type_name', 'unique_id'}
-    #         element_cols = [col for col in sample_table.columns if col not in non_element_cols]
-    #
-    #         # Save element names
-    #         elements_encoded = np.array(element_cols, dtype='S10')
-    #         f.create_dataset('measurements/Measurement_1/libs/metadata/elements', data=elements_encoded)
-    #
-    #         # Save sample metadata (per-sample arrays)
-    #         for col in sample_table.columns:
-    #             col_data = sample_table[col].values
-    #             # Handle string columns by encoding to bytes
-    #             if col_data.dtype == object or col_data.dtype.kind == 'U':
-    #                 col_data = np.array(col_data, dtype='S64')
-    #             f.create_dataset(f'measurements/Measurement_1/libs/metadata/samples/{col}', data=col_data)
-    #
-    #         # Save element concentrations as a 2D array (n_samples x n_elements)
-    #         concentration_matrix = sample_table[element_cols].values
-    #         f.create_dataset('measurements/Measurement_1/libs/metadata/concentrations', data=concentration_matrix)
-    #
-    #         # Save plasma parameters
-    #         f.create_dataset('measurements/Measurement_1/libs/metadata/Te', data=sample_table['Te'].values)
-    #         f.create_dataset('measurements/Measurement_1/libs/metadata/Ne', data=sample_table['Ne'].values)
-    #
-    #         # Global metadata (placeholder values)
-    #         f.create_dataset('measurements/Measurement_1/libs/metadata/x', data=np.zeros(len(sample_table)))
-    #         f.create_dataset('measurements/Measurement_1/libs/metadata/y', data=np.zeros(len(sample_table)))
-    #         f.create_dataset('measurements/Measurement_1/libs/metadata/z', data=np.zeros(len(sample_table)))
-    #         f.create_dataset('measurements/Measurement_1/libs/metadata/X_pos', data=np.zeros(len(sample_table)))
-    #         f.create_dataset('measurements/Measurement_1/libs/metadata/Y_pos', data=np.zeros(len(sample_table)))
-    #         f.create_dataset('measurements/Measurement_1/global_metadata/Width Spacing', data=0)
-    #         f.create_dataset('measurements/Measurement_1/global_metadata/Height Spacing', data=0)
-    #         f.create_dataset('measurements/Measurement_1/global_metadata/optical_path_length', data=OPTICAL_PATH_LENGTH)
-    #         f.create_dataset('measurements/Measurement_1/global_metadata/number_density', data=NUMBER_DENSITY)
-    #
-    #     print(f"Combined HDF5 file saved to: {h5_path}")
-    # except ImportError:
-    #     print("h5py not available, skipping HDF5 output")
-
+# Disabled legacy save helper (kept as comments intentionally).
+# def save_results(sample_table: pd.DataFrame,
+#                  spectra: np.ndarray,
+#                  wavelength: np.ndarray,
+#                  output_dir: str = None):
+#     ...
 
 # ============================================================================
 # Main Execution
