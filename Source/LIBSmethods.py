@@ -278,21 +278,17 @@ def partition_function(elem, T):
     ValueError
         If temperature T is zero or negative
     """
-    # Validate temperature input
     if T <= 0:
         raise ValueError(f"Temperature must be positive, got T={T} K. Temperature must be > 0 to avoid division by zero.")
     
-    # Use context manager to ensure connection is always closed, even if exceptions occur
     with sqlite3.connect(PARTITION_FUNCTION_PATH) as conn:
         cursor = conn.cursor()  
-        # Get the partition function for the element elem
         cursor.execute("SELECT Elem_name, ion_state, Ei, gi FROM PartF_var WHERE Elem_name = ?", (elem,))
         df = pd.DataFrame(cursor.fetchall(), columns=['Elem_name', 'ion_state', 'Ei', 'gi'])
         df_I = df[(df['ion_state'] == 'I')]
         df_II = df[(df['ion_state'] == 'II')]
         kb_eV = 8.617333262e-5  # eV/K
         
-        # Handle empty dataframes to avoid errors
         if df_I.empty:
             U_I = 0.0
         else:
@@ -305,4 +301,63 @@ def partition_function(elem, T):
             U_II = np.sum(df_II['gi'] * np.exp(-df_II['Ei'] / (kb_eV * T)))
             U_II = float(U_II)
     
+    return U_I, U_II
+
+
+# ---------------------------------------------------------------------------
+# Cached version – avoids re-opening the DB on every call
+# ---------------------------------------------------------------------------
+_partf_data_cache: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = {}
+_partf_conn = None
+
+
+def _get_partf_connection(db_path: str):
+    """Reuse a single connection for partition-function queries."""
+    global _partf_conn
+    if _partf_conn is None:
+        _partf_conn = sqlite3.connect(db_path)
+    return _partf_conn
+
+
+def _load_partf_data(elem: str, db_path: str):
+    """Load gi/Ei arrays for neutral (I) and ionised (II) states once."""
+    if elem not in _partf_data_cache:
+        conn = _get_partf_connection(db_path)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT ion_state, Ei, gi FROM PartF_var WHERE Elem_name = ?",
+            (elem,),
+        )
+        rows = cur.fetchall()
+        gi_I, Ei_I, gi_II, Ei_II = [], [], [], []
+        for ion_state, Ei, gi in rows:
+            if ion_state == "I":
+                gi_I.append(gi)
+                Ei_I.append(Ei)
+            elif ion_state == "II":
+                gi_II.append(gi)
+                Ei_II.append(Ei)
+        _partf_data_cache[elem] = (
+            np.array(gi_I, dtype=np.float64),
+            np.array(Ei_I, dtype=np.float64),
+            np.array(gi_II, dtype=np.float64),
+            np.array(Ei_II, dtype=np.float64),
+        )
+    return _partf_data_cache[elem]
+
+
+def partition_function_cached(elem: str, T: float, db_path: str) -> tuple[float, float]:
+    """
+    Same physics as partition_function() but:
+      - accepts an explicit db_path (no hard-coded path)
+      - caches gi/Ei arrays so the DB is hit only once per element
+    """
+    if T <= 0:
+        raise ValueError(f"Temperature must be positive, got T={T} K.")
+
+    gi_I, Ei_I, gi_II, Ei_II = _load_partf_data(elem, db_path)
+    kb_eV = 8.617333262e-5  # eV/K
+
+    U_I = float(np.sum(gi_I * np.exp(-Ei_I / (kb_eV * T)))) if gi_I.size else 0.0
+    U_II = float(np.sum(gi_II * np.exp(-Ei_II / (kb_eV * T)))) if gi_II.size else 0.0
     return U_I, U_II

@@ -224,76 +224,144 @@ def generate_sample_table(concentration_ranges: dict,
     return pd.DataFrame(data)
 
 
+import multiprocessing as _mp
+
+_mp_ctx = _mp.get_context("forkserver")
+
+# ---------------------------------------------------------------------------
+# Worker state – set once per worker process via Pool initializer
+# ---------------------------------------------------------------------------
+_w_wavelength: np.ndarray | None = None
+_w_db_path: str | None = None
+_w_n_density: float = 0.0
+_w_optical_path: float = 0.0
+
+
+def _init_worker(wavelength: np.ndarray, db_path: str,
+                 n_density: float, optical_path: float) -> None:
+    """Called once in each worker process to set shared state."""
+    global _w_wavelength, _w_db_path, _w_n_density, _w_optical_path
+    _w_wavelength = wavelength
+    _w_db_path = db_path
+    _w_n_density = n_density
+    _w_optical_path = optical_path
+
+    # Reset SpectraGenerator caches so forked connections are not reused.
+    import SpectraGenerator as _sg
+    _sg._db_connection = None
+    _sg._quant_cache.clear()
+    _sg._eion_cache.clear()
+
+    import LIBSmethods as _lm
+    _lm._partf_conn = None
+    _lm._partf_data_cache.clear()
+
+
+def _generate_one(args: tuple) -> tuple[int, np.ndarray]:
+    """Generate a single sample spectrum (runs inside a worker process)."""
+    idx, elements, concentrations, Te_i, Ne_i = args
+    spectrum = np.zeros(len(_w_wavelength))
+    for j, elem in enumerate(elements):
+        if concentrations[j] > 0:
+            try:
+                spectrum += create_spectra(
+                    element=elem,
+                    wavelength=_w_wavelength,
+                    Te=Te_i,
+                    Ne=Ne_i,
+                    N=_w_n_density,
+                    C=concentrations[j],
+                    l=_w_optical_path,
+                    db_path=_w_db_path,
+                )
+            except Exception:
+                pass
+    return idx, unit_norm(spectrum)
+
+
 def generate_synthetic_spectra(sample_table: pd.DataFrame,
                                 wavelength: np.ndarray,
+                                db_path: str = None,
                                 n_density: float = NUMBER_DENSITY,
                                 optical_path: float = OPTICAL_PATH_LENGTH,
-                                verbose: bool = True) -> np.ndarray:
+                                verbose: bool = True,
+                                n_workers: int = None) -> np.ndarray:
     """
     Generate synthetic spectra for all samples in the table.
-    
+
     Parameters
     ----------
     sample_table : pd.DataFrame
         Table with element concentrations and plasma parameters.
-        Element columns are automatically detected (all columns except Te, Ne).
     wavelength : np.ndarray
         Wavelength array (nm)
+    db_path : str, optional
+        Path to LIBS SQLite database (forwarded to create_spectra).
     n_density : float
         Number density (cm^-3)
     optical_path : float
         Optical path length (cm)
     verbose : bool
         Print progress information
-        
+    n_workers : int, optional
+        Number of parallel workers (defaults to cpu_count).
+        Set to 1 to disable multiprocessing.
+
     Returns
     -------
     np.ndarray
         2D array of shape (n_samples, n_wavelengths) containing spectra
     """
+    if db_path is None:
+        db_path = DATABASE_PATH
+
     n_samples = len(sample_table)
     n_wavelengths = len(wavelength)
     spectra = np.zeros((n_samples, n_wavelengths))
-    
-    # Get element columns (all columns except plasma parameters and metadata)
+
     non_element_cols = {'Te', 'Ne', 'sample_type_id', 'sample_type_name', 'unique_id'}
     elements = [col for col in sample_table.columns if col not in non_element_cols]
-    
+
     if verbose:
         print(f"   Elements to process: {elements}")
-    
-    for i, row in sample_table.iterrows():
-        if verbose and i % 10 == 0:
-            print(f"Generating spectrum {i+1}/{n_samples}...")
-        
-        Te = row['Te']
-        Ne = row['Ne']
-        
-        # Sum contributions from all elements with non-zero concentration
-        spectrum = np.zeros(n_wavelengths)
-        for elem in elements:
-            concentration = row[elem]
-            if concentration > 0:
-                try:
-                    elem_spectrum = create_spectra(
-                        element=elem,
-                        wavelength=wavelength,
-                        Te=Te,
-                        Ne=Ne,
-                        N=n_density,
-                        C=concentration,
-                        l=optical_path
-                    )
-                    spectrum += elem_spectrum
-                except Exception as e:
-                    if verbose:
-                        print(f"  Warning: Could not generate spectrum for {elem}: {e}")
-        
-        spectra[i] = unit_norm(spectrum)
-    
+
+    Te_arr = sample_table['Te'].values
+    Ne_arr = sample_table['Ne'].values
+    conc_matrix = sample_table[elements].values
+
+    if n_workers is None:
+        n_workers = min(_mp.cpu_count(), n_samples)
+
+    # Build lightweight per-sample argument tuples
+    tasks = [
+        (i, elements, conc_matrix[i], Te_arr[i], Ne_arr[i])
+        for i in range(n_samples)
+    ]
+
+    if n_workers > 1 and n_samples > 1:
+        if verbose:
+            print(f"   Parallelising across {n_workers} workers...")
+        with _mp_ctx.Pool(
+            processes=n_workers,
+            initializer=_init_worker,
+            initargs=(wavelength, db_path, n_density, optical_path),
+        ) as pool:
+            for idx, spectrum in pool.imap_unordered(_generate_one, tasks, chunksize=4):
+                spectra[idx] = spectrum
+                if verbose and (idx + 1) % 200 == 0:
+                    print(f"   Completed {idx + 1}/{n_samples}")
+    else:
+        # Sequential fallback
+        _init_worker(wavelength, db_path, n_density, optical_path)
+        for task in tasks:
+            idx, spectrum = _generate_one(task)
+            spectra[idx] = spectrum
+            if verbose and idx % 100 == 0:
+                print(f"Generating spectrum {idx + 1}/{n_samples}...")
+
     if verbose:
         print(f"Generated {n_samples} synthetic spectra.")
-    
+
     return spectra
 
 
@@ -318,35 +386,21 @@ class SyntheticLIBSDataset(Dataset):
         self.sample_table, self.spectra = self._generate_all()
 
     def _generate_all(self) -> tuple[pd.DataFrame, np.ndarray]:
+        # Phase 1 -- build all sample tables (fast, sequential)
         all_sample_tables = []
-        all_spectra = []
-
         for i, sample_type in enumerate(self.sample_types):
             sample_id = sample_type['sample_id']
             sample_name = sample_type['sample_name']
             n_samples = sample_type['n_samples']
             concentration_ranges = sample_type['concentration_ranges']
 
-            if self.verbose:
-                print(f"\n{'='*70}")
-                print(f"Processing Sample Type {i+1}/{len(self.sample_types)}: {sample_name} ({sample_id})")
-                print(f"{'='*70}")
-
-                print(f"\n1. Validating elements for {sample_name}...")
             try:
-                elements = validate_elements(concentration_ranges, self.db_path)
-                if self.verbose:
-                    print(f"   Using {len(elements)} elements: {', '.join(elements)}")
+                validate_elements(concentration_ranges, self.db_path)
             except ValueError as e:
-                print(f"   WARNING: Skipping {sample_name} - {e}")
+                if self.verbose:
+                    print(f"   WARNING: Skipping {sample_name} - {e}")
                 continue
 
-            if self.verbose:
-                print(f"\n2. Concentration ranges for {sample_name}:")
-                for elem, (c_min, c_max) in concentration_ranges.items():
-                    print(f"   {elem}: {c_min*100:.3f}% - {c_max*100:.3f}%")
-
-                print(f"\n3. Generating {n_samples} samples for {sample_name}...")
             sample_table = generate_sample_table(
                 concentration_ranges=concentration_ranges,
                 n_samples=n_samples,
@@ -354,28 +408,26 @@ class SyntheticLIBSDataset(Dataset):
                 sample_name=sample_name,
                 te_range=self.te_range,
                 ne_range=self.ne_range,
-                random_seed=42 + i
+                random_seed=42 + i,
             )
-            if self.verbose:
-                print(f"   Generated {len(sample_table)} samples")
-                print(f"   Te range: {sample_table['Te'].min():.0f} - {sample_table['Te'].max():.0f} K")
-                print(f"   Ne range: {sample_table['Ne'].min():.2e} - {sample_table['Ne'].max():.2e} cm^-3")
-
-                print(f"\n4. Generating synthetic spectra for {sample_name}...")
-            spectra = generate_synthetic_spectra(
-                sample_table=sample_table,
-                wavelength=self.wavelength,
-                verbose=self.verbose
-            )
-
             all_sample_tables.append(sample_table)
-            all_spectra.append(spectra)
 
         if not all_sample_tables:
             return pd.DataFrame(), np.empty((0, len(self.wavelength)))
 
         combined_sample_table = pd.concat(all_sample_tables, ignore_index=True).fillna(0)
-        combined_spectra = np.vstack(all_spectra)
+
+        if self.verbose:
+            print(f"\nTotal samples to generate spectra for: {len(combined_sample_table)}")
+
+        # Phase 2 -- generate all spectra in one parallelised batch
+        combined_spectra = generate_synthetic_spectra(
+            sample_table=combined_sample_table,
+            wavelength=self.wavelength,
+            db_path=self.db_path,
+            verbose=self.verbose,
+        )
+
         return combined_sample_table, combined_spectra
 
     def __len__(self) -> int:

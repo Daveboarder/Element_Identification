@@ -151,7 +151,7 @@ def load_sample_types_from_excel() -> list[dict[str, Any]]:
             {
                 "sample_id": _normalize_sample_id(sample_name, row_idx),
                 "sample_name": sample_name,
-                "n_samples": 1,
+                "n_samples": 100,
                 "concentration_ranges": concentration_ranges,
             }
         )

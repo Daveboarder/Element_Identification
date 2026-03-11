@@ -1,35 +1,16 @@
-#Function generates optical emission spectra based on given elemnt, temperature and pressure and electron density
 import numpy as np
-import matplotlib.pyplot as plt
+import os
 import scipy.constants as const
-from LIBSmethods import voigt, partition_function
-import h5py
+from LIBSmethods import voigt, partition_function_cached
 import sqlite3
 import pandas as pd
-import matplotlib.pyplot as plt
-"""def generate_spectra(element, temperature, electron_density):
-    #Calculate the energy of the electron in the ground state
-    energy_ground_state = const.Rydberg * const.Z**2 / (1 + const.Z**2)
-    #Calculate the energy of the electron in the excited state
-    energy_excited_state = const.Rydberg * const.Z**2 / (1 + const.Z**2)
-    #Calculate the energy of the electron in the ionized state
-    energy_ionized_state = const.Rydberg * const.Z**2 / (1 + const.Z**2)
-    #Calculate the energy of the electron in the metastable state
-    energy_metastable_state = const.Rydberg * const.Z**2 / (1 + const.Z**2)
-"""
 
-#Constants========================================================
-kb = const.k*10**7 #erg/K
-h = const.h*10**7 #erg*s
-c = const.c #m/s
-e = const.e #C
-me = const.electron_mass*1000 #g
-#-----------------------------------------------------------------
-Te = 12705 #K
-Ne = 1.79e+18 #cm^-3
-l = 1.4e-04
-N=1e-4 #cm^-3
-C= 1
+# Constants
+kb = const.k * 10**7       # erg/K
+h = const.h * 10**7        # erg*s
+c = const.c                # m/s
+e = const.e                # C
+me = const.electron_mass * 1000  # g
 
 print(f"kb: {kb}")
 print(f"h: {h}")
@@ -37,89 +18,169 @@ print(f"c: {c}")
 print(f"e: {e}")
 print(f"me: {me}")
 
-#read sample wavelengths
+# ---------------------------------------------------------------------------
+# Module-level caches (populated lazily, survive the whole process lifetime)
+# ---------------------------------------------------------------------------
+_db_connection = None
+_quant_cache: dict[str, pd.DataFrame] = {}
+_eion_cache: dict[str, float] = {}
 
-#file_path = '/home/LIBS/prochazka/data/Running_projects/25_0069_3D_chemical_imaging/Measurements/mandible 266nm/mandible_266_v1.h5'
-#with h5py.File(file_path, 'r') as file:
-#    wavelength = file['measurements/Measurement_1/libs/calibration'][:]
 
-#element = 'Li'
+def _get_connection(db_path: str):
+    """Reuse a single read-only SQLite connection across all calls."""
+    global _db_connection
+    if _db_connection is None:
+        _db_connection = sqlite3.connect(db_path)
+    return _db_connection
 
-def create_spectra(element, wavelength, Te=12705, Ne=1.79e+18, N=1e-4, C=1, l=1.4e-04):
+
+def _get_quant_param(element: str, db_path: str) -> pd.DataFrame:
+    """Fetch QuantParam rows for *element* (cached after first call)."""
+    if element not in _quant_cache:
+        conn = _get_connection(db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT Elem_name, ion_state, Wavelength, Ei, Ek, gi, gk, Ak "
+            "FROM QuantParam WHERE Elem_name = ?",
+            (element,),
+        )
+        _quant_cache[element] = pd.DataFrame(
+            cursor.fetchall(),
+            columns=["Elem_name", "ion_state", "Wavelength", "Ei", "Ek", "gi", "gk", "Ak"],
+        )
+    return _quant_cache[element]
+
+
+def _get_eion(element: str, db_path: str) -> float:
+    """Fetch ionisation energy for *element* (cached after first call)."""
+    if element not in _eion_cache:
+        conn = _get_connection(db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT Eion FROM E_ion WHERE Elem_name = ?", (element + "+I",)
+        )
+        result = cursor.fetchall()
+        if not result:
+            raise ValueError(
+                f"Ionization energy (E_ion) not found for element "
+                f"'{element}+I' in database."
+            )
+        _eion_cache[element] = result[0][0]
+    return _eion_cache[element]
+
+
+# ---------------------------------------------------------------------------
+# Voigt profile constants (fixed across all calls)
+# ---------------------------------------------------------------------------
+_GAMMA_FIT = 0.1
+_SIGMA_FIT = 0.006
+_SIGMA_SQRT2 = _SIGMA_FIT * np.sqrt(2)
+_NORM = 1.0 / (_SIGMA_FIT * np.sqrt(2 * np.pi))
+
+
+def _voigt_all_lines(wavelength: np.ndarray,
+                     wavelength_lines: np.ndarray,
+                     amplitudes: np.ndarray,
+                     window: float = 1.5) -> np.ndarray:
+    """
+    Windowed Voigt profile: for each spectral line, only evaluate wavelength
+    points within *window* nm of the line centre. Much faster than the full
+    (W, L) broadcast when the profile is narrow relative to the array span.
+    """
+    from scipy.special import wofz
+
+    result = np.zeros_like(wavelength)
+    n_wl = wavelength.size
+
+    # Pre-sort wavelength once so we can use searchsorted per line
+    sorted_idx = np.argsort(wavelength)
+    wl_sorted = wavelength[sorted_idx]
+
+    for k in range(wavelength_lines.size):
+        centre = wavelength_lines[k]
+        amp = amplitudes[k]
+        lo = np.searchsorted(wl_sorted, centre - window, side='left')
+        hi = np.searchsorted(wl_sorted, centre + window, side='right')
+        if lo >= hi:
+            continue
+        idx = sorted_idx[lo:hi]
+        z = (wavelength[idx] - centre + 1j * _GAMMA_FIT) / _SIGMA_SQRT2
+        result[idx] += amp * wofz(z).real * _NORM
+
+    return result
+
+
+def create_spectra(element, wavelength, Te=12705, Ne=1.79e+18,
+                   N=1e-4, C=1, l=1.4e-04, db_path=None):
     """
     Generate synthetic optical emission spectra for a given element.
-    
-    Parameters:
-    -----------
+
+    Parameters
+    ----------
     element : str
         Element symbol (e.g., 'Li', 'Cu')
     wavelength : array-like
-        Wavelength array (in nm) where the spectrum will be evaluated
+        Wavelength array (nm)
     Te : float
-        Temperature in Kelvin (default: 12705)
+        Temperature in Kelvin
     Ne : float
-        Electron number density in cm^-3 (default: 1.79e+18)
+        Electron number density in cm^-3
     N : float
-        Number density in cm^-3 (default: 1e-4)
+        Number density in cm^-3
     C : float
-        Content of element (default: 1 ~ 100%)
+        Content of element (1 = 100 %)
     l : float
-        Optical path length in cm (default: 1.4e-04)
-    
-    Returns:
-    --------
-    Ifin_voigt : numpy array
-        Synthetic spectrum intensity as a function of wavelength
+        Optical path length in cm
+    db_path : str, optional
+        Path to LIBS_data_vacuum.db (auto-resolved if None)
+
+    Returns
+    -------
+    numpy.ndarray
+        Synthetic spectrum intensity evaluated at *wavelength*.
     """
-    # Single database file containing all tables
-    DATABASE_PATH = '/home/LIBS/prochazka/data/Running_projects/24_0057_LIBSdata_processing/Methods/Mapping/Java/LIBS_data.db'
+    if db_path is None:
+        db_path = os.path.join(os.path.dirname(__file__), 'LIBS_data_vacuum.db')
 
-    # Use context manager to ensure connection is always closed
-    with sqlite3.connect(DATABASE_PATH) as conn:
-        cursor = conn.cursor()  
-        # Get the partition function for the element elem
-        cursor.execute("SELECT Elem_name, ion_state, Wavelength, Ei, Ek, gi, gk, Ak FROM QuantParam WHERE Elem_name = ?", (element,))
-        QuantParam = pd.DataFrame(cursor.fetchall(), columns=['Elem_name', 'ion_state', 'Wavelength', 'Ei', 'Ek', 'gi', 'gk', 'Ak'])
-        print(f"QuantParam: {QuantParam.head()}")
-        
-        cursor.execute("SELECT Eion FROM E_ion WHERE Elem_name = ?", (element+'+I',))
-        E_ion_result = cursor.fetchall()
-        if not E_ion_result:
-            raise ValueError(f"Ionization energy (E_ion) not found for element '{element}+I' in database. Please ensure the element data exists in the E_ion table.")
-        E_ion = E_ion_result[0][0]
-        print(f"E_ion: {E_ion}")
+    QuantParam = _get_quant_param(element, db_path)
+    if QuantParam.empty:
+        return np.zeros_like(wavelength, dtype=float)
 
-    PF_I, PF_II = partition_function(element, Te)
-    S10 = (((2*PF_II)/(Ne*PF_I))*((me*kb*Te)/((h**2)/(2*np.pi)))**(1.5))*np.exp(-(E_ion*1.60217e-12)/(kb*Te)) if not QuantParam.empty else 1
-    kt = ((QuantParam['Wavelength']**4)/(8*np.pi*c)) * (QuantParam['Ak']*QuantParam['gk']*np.exp(-(QuantParam['Ei']*1.60217e-12)/(kb*Te))) * (1-np.exp(-1.60217e-12*(QuantParam['Ek']-QuantParam['Ei'])/(kb*Te))) / np.where(QuantParam['ion_state']=="I", PF_I, PF_II)
-    ri = np.where(QuantParam['ion_state']=="I", 1/(1+S10), S10/(1+S10))
-    ion_state = np.where(QuantParam['ion_state']=="I", 1, 0)
-    Lp = ((8*np.pi*h*c)/(10*QuantParam['Wavelength']**3))*N*np.exp((-1.60217e-12*(QuantParam['Ek']-QuantParam['Ei']))/(kb*Te))*(QuantParam['gk']/QuantParam['gi'])
-    tau = C*N*ri*l*kt
-    Ifin = Lp*(1-np.exp(-tau))
+    E_ion = _get_eion(element, db_path)
 
-    # Apply Voigt profile to each spectral line and sum them
-    # Convert to numpy arrays to avoid pandas broadcasting issues
-    wavelength_arr = np.array(wavelength)
-    wavelength_lines = QuantParam['Wavelength'].values  # Convert pandas Series to numpy array
-    Ifin_arr = Ifin.values  # Convert pandas Series to numpy array
+    PF_I, PF_II = partition_function_cached(element, Te, db_path)
 
-    # Initialize the spectrum array
-    Ifin_voigt = np.zeros_like(wavelength_arr)
+    S10 = (
+        ((2 * PF_II) / (Ne * PF_I))
+        * ((me * kb * Te) / ((h**2) / (2 * np.pi))) ** 1.5
+        * np.exp(-(E_ion * 1.60217e-12) / (kb * Te))
+    )
 
-    # Sum Voigt profiles for each spectral line
-    gamma_fit = 0.1
-    sigma_fit = 0.006
-    for i in range(len(wavelength_lines)):
-        Ifin_voigt += voigt(wavelength_arr, wavelength_lines[i], Ifin_arr[i], gamma_fit, sigma_fit)
+    ion_is_I = (QuantParam["ion_state"] == "I").values
+    pf_per_line = np.where(ion_is_I, PF_I, PF_II)
+    ri = np.where(ion_is_I, 1 / (1 + S10), S10 / (1 + S10))
 
-    return Ifin_voigt
+    wl = QuantParam["Wavelength"].values
+    Ak = QuantParam["Ak"].values
+    gk = QuantParam["gk"].values
+    gi = QuantParam["gi"].values
+    Ei = QuantParam["Ei"].values
+    Ek = QuantParam["Ek"].values
 
-#Ifin_voigt = create_spectra(element, wavelength, Te, Ne, N, C, l)
-#Plot Ifin_voigt as a function of wavelength using plotly
-#import plotly.graph_objects as go
-#fig = go.Figure()
-#fig.add_trace(go.Scatter(x=wavelength, y=Ifin_voigt, mode='lines', name=f'Spectrum: {element}'))
-#fig.update_layout(title=f'Spectrum: {element}', xaxis_title='Wavelength (nm)', yaxis_title='Intensity (a.u.)')
-#fig.write_html('SpectraGenerator.html')
-#print("Plot saved to SpectraGenerator.html")
+    eV_to_erg = 1.60217e-12
+    kbT = kb * Te
+
+    kt = (
+        (wl**4 / (8 * np.pi * c))
+        * (Ak * gk * np.exp(-Ei * eV_to_erg / kbT))
+        * (1 - np.exp(-eV_to_erg * (Ek - Ei) / kbT))
+        / pf_per_line
+    )
+
+    Lp = (8 * np.pi * h * c) / (10 * wl**3) * N * np.exp(-eV_to_erg * (Ek - Ei) / kbT) * (gk / gi)
+
+    tau = C * N * ri * l * kt
+    Ifin = Lp * (1 - np.exp(-tau))
+
+    wavelength_arr = np.asarray(wavelength, dtype=np.float64)
+    return _voigt_all_lines(wavelength_arr, wl, Ifin)
