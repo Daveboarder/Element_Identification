@@ -8,7 +8,7 @@ This script:
 3. Performs matrix multiplication: spectra @ weights.T  -> (n_samples, 7700)
 4. Reduces 7700 features to 77 via a trainable projection matrix (optimized during training)
 5. Feeds the 77 projected features into a FC hidden layer
-6. Predicts element presence (0-1) for all 77 elements
+6. Predicts element concentrations (0-1) for all 77 elements
 
 Architecture:
     spectra @ weight_spectra.T -> (n, 7700) @ W_proj -> (n, 77) -> Hidden -> Output (77)
@@ -160,10 +160,10 @@ def prepare_features(synthetic_spectra, weight_matrix):
     return features
 
 
-def prepare_targets(concentrations, synth_elements, weight_elements, threshold=0.0):
+def prepare_targets(concentrations, synth_elements, weight_elements):
     """
     Create target matrix for all weight elements.
-    Output values: 0 = element not present, 1 = element present
+    Output values are concentrations in [0, 1].
     """
     n_samples = concentrations.shape[0]
     n_weight_elements = len(weight_elements)
@@ -178,14 +178,13 @@ def prepare_targets(concentrations, synth_elements, weight_elements, threshold=0
             conc = np.nan_to_num(
                 concentrations[:, i], nan=0.0, posinf=0.0, neginf=0.0
             ).astype(np.float32)
-            # Binary presence/absence target expected by BCE loss.
-            targets[:, idx] = (conc > threshold).astype(np.float32)
+            targets[:, idx] = np.clip(conc, 0.0, 1.0)
         else:
             print(f"  {elem} -> NOT FOUND!")
     
     print(f"\nTargets: {targets.shape}")
     print(f"  Target value range: [{targets.min():.1f}, {targets.max():.1f}]")
-    print(f"  Elements present per sample: {targets.sum(axis=1).mean():.2f} average")
+    print(f"  Mean total concentration per sample: {targets.sum(axis=1).mean():.3f}")
     
     return targets
 
@@ -243,7 +242,7 @@ if USE_TORCH:
 
     def train_torch(model, train_loader, val_loader, epochs):
         """Train using PyTorch."""
-        criterion = nn.BCELoss()
+        criterion = nn.MSELoss()
         optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=30)
         
@@ -265,7 +264,7 @@ if USE_TORCH:
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
-                train_correct += ((outputs > 0.5).float() == targets).sum().item()
+                train_correct += ((outputs > 0.5).float() == (targets > 0.0).float()).sum().item()
                 train_total += targets.numel()
             
             model.eval()
@@ -275,7 +274,7 @@ if USE_TORCH:
                     inputs, targets = inputs.to(device), targets.to(device)
                     outputs = model(inputs)
                     val_loss += criterion(outputs, targets).item()
-                    val_correct += ((outputs > 0.5).float() == targets).sum().item()
+                    val_correct += ((outputs > 0.5).float() == (targets > 0.0).float()).sum().item()
                     val_total += targets.numel()
             
             train_loss /= len(train_loader)
@@ -318,9 +317,8 @@ def relu(x):
 def relu_derivative(x):
     return (x > 0).astype(float)
 
-def bce_loss(y_pred, y_true, eps=1e-7):
-    y_pred = np.clip(y_pred, eps, 1 - eps)
-    return -np.mean(y_true * np.log(y_pred) + (1 - y_true) * np.log(1 - y_pred))
+def mse_loss(y_pred, y_true):
+    return np.mean((y_pred - y_true) ** 2)
 
 
 class NumpyNN:
@@ -380,11 +378,11 @@ def train_numpy(model, X_train, y_train, X_val, y_val, epochs, lr):
     for epoch in range(epochs):
         train_pred = model.forward(X_train)
         model.backward(X_train, y_train, lr)
-        train_loss = bce_loss(train_pred, y_train)
-        train_acc = ((train_pred > 0.5) == y_train).mean()
+        train_loss = mse_loss(train_pred, y_train)
+        train_acc = ((train_pred > 0.5) == (y_train > 0.0)).mean()
         val_pred = model.forward(X_val)
-        val_loss = bce_loss(val_pred, y_val)
-        val_acc = ((val_pred > 0.5) == y_val).mean()
+        val_loss = mse_loss(val_pred, y_val)
+        val_acc = ((val_pred > 0.5) == (y_val > 0.0)).mean()
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss)
         history['train_acc'].append(train_acc)
@@ -405,15 +403,16 @@ def evaluate_model(predict_fn, X_test, y_test, element_names):
     """Evaluate model and print results."""
     y_pred = predict_fn(X_test)
     y_pred_binary = (y_pred > 0.5).astype(float)
+    y_true_binary = (y_test > 0.0).astype(float)
     
     print("\n" + "=" * 70)
     print("EVALUATION RESULTS")
     print("=" * 70)
     
-    overall_acc = (y_pred_binary == y_test).mean()
+    overall_acc = (y_pred_binary == y_true_binary).mean()
     print(f"\nOverall Accuracy: {overall_acc:.4f}")
     
-    active = np.where(y_test.sum(axis=0) > 0)[0]
+    active = np.where(y_true_binary.sum(axis=0) > 0)[0]
     print(f"\nActive elements in test set ({len(active)}):")
     print("-" * 70)
     print(f"{'Element':<10} {'Accuracy':<12} {'Precision':<12} {'Recall':<12} {'F1':<12}")
@@ -422,7 +421,7 @@ def evaluate_model(predict_fn, X_test, y_test, element_names):
     for idx in active:
         elem = element_names[idx]
         pred = y_pred_binary[:, idx]
-        true = y_test[:, idx]
+        true = y_true_binary[:, idx]
         acc = (pred == true).mean()
         tp = ((pred == 1) & (true == 1)).sum()
         pp, ap = pred.sum(), true.sum()
@@ -436,7 +435,7 @@ def evaluate_model(predict_fn, X_test, y_test, element_names):
     print("\nSample Predictions (first 3 test samples):")
     print("-" * 70)
     for i in range(min(3, len(y_test))):
-        true_elems = [element_names[j] for j in range(len(element_names)) if y_test[i, j] > 0]
+        true_elems = [element_names[j] for j in range(len(element_names)) if y_true_binary[i, j] > 0]
         pred_elems = [element_names[j] for j in range(len(element_names)) if y_pred_binary[i, j] > 0]
         top_idx = np.argsort(y_pred[i])[::-1][:10]
         top_probs = [(element_names[j], y_pred[i, j]) for j in top_idx]
@@ -457,18 +456,18 @@ def print_all_predictions(predict_fn, X_sample, y_true, element_names, sample_id
     print(f"ALL {n} ELEMENTS - SAMPLE #{sample_idx + 1}")
     print("=" * 80)
     
-    true_elements = [element_names[i] for i in range(n) if y_true[i] > 0.5]
+    true_elements = [element_names[i] for i in range(n) if y_true[i] > 0.0]
     print(f"\nGround Truth Elements: {true_elements}")
     print(f"Number of elements present: {len(true_elements)}")
     
     sorted_idx = np.argsort(y_pred)[::-1]
     print(f"\n{'Element':<8} {'NN Output':<14} {'Ground Truth':<14}")
-    print("-" * 36)
+    print("-" * 40)
     
     for idx in sorted_idx:
-        print(f"{element_names[idx]:<8} {y_pred[idx]:<14.6f} {y_true[idx]:<14.1f}")
+        print(f"{element_names[idx]:<8} {y_pred[idx]:<14.6f} {y_true[idx]:<14.6f}")
     
-    print("-" * 36)
+    print("-" * 40)
 
 
 # ============================================================================
@@ -518,7 +517,7 @@ if __name__ == "__main__":
     print(f"  Features: {n_features} (from weight matrix multiplication)")
     print(f"  Projection: {n_features} -> {n_elements} (trainable weight matrix)")
     print(f"  Hidden: {n_elements} -> {HIDDEN_LAYER_SIZE}")
-    print(f"  Output: {HIDDEN_LAYER_SIZE} -> {n_outputs} (0=absent, 1=present)")
+    print(f"  Output: {HIDDEN_LAYER_SIZE} -> {n_outputs} (predicted concentration in [0,1])")
     
     # 7. Train
     if USE_TORCH:
