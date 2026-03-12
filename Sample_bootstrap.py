@@ -73,9 +73,11 @@ def unit_norm(vector: np.ndarray) -> np.ndarray:
     """
     Normalize a vector to have unit length.
     """
-    vector = (vector - np.min(vector))
-    vector = vector / np.max(vector)
-    return vector
+    vector = vector - np.min(vector)
+    vmax = np.max(vector)
+    if vmax == 0:
+        return vector
+    return vector / vmax
 
 def get_elements_from_database(db_path: str) -> list:
     """
@@ -226,8 +228,6 @@ def generate_sample_table(concentration_ranges: dict,
 
 import multiprocessing as _mp
 
-_mp_ctx = _mp.get_context("forkserver")
-
 # ---------------------------------------------------------------------------
 # Worker state – set once per worker process via Pool initializer
 # ---------------------------------------------------------------------------
@@ -341,7 +341,7 @@ def generate_synthetic_spectra(sample_table: pd.DataFrame,
     if n_workers > 1 and n_samples > 1:
         if verbose:
             print(f"   Parallelising across {n_workers} workers...")
-        with _mp_ctx.Pool(
+        with _mp.Pool(
             processes=n_workers,
             initializer=_init_worker,
             initargs=(wavelength, db_path, n_density, optical_path),

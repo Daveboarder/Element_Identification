@@ -125,7 +125,7 @@ def load_synthetic_data_from_dataloader(batch_size=64):
             TensorDataset(torch.FloatTensor(spectra_np), torch.FloatTensor(concentrations_np)),
             batch_size=batch_size,
             shuffle=False,
-            num_workers=12
+            num_workers=0
         )
 
         spectra_batches = []
