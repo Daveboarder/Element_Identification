@@ -41,7 +41,10 @@ DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'Source', 'LIBS_data_vac
 # Read sample wavelength from h5 file
 # MODIFY THIS PATH to match your spectrometer / measurement setup
 file_path = '/mnt/data/projects/Running_projects/26_0128_Element_Identification/Methods/Element_Identification-1/Data/VASKUT K8.json'
-data, wavelength = get_spectra(file_path, run_id=1)
+w1, spectraData_1 = get_spectra(file_path, 1, 1, 1)
+w2, spectraData_2 = get_spectra(file_path, 1, 1, 2)
+wavelength = np.concatenate([w1, w2])
+data = np.concatenate([spectraData_1, spectraData_2])
 
 # ----------------------------------------------------------------------------
 # Plasma Parameters (MODIFY THESE VALUES)
