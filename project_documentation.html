@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Element Identification Project Documentation</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --bg-soft: #131a2e;
+      --panel: #1b2440;
+      --panel-2: #202c4d;
+      --text: #e9eefc;
+      --muted: #aeb9d8;
+      --accent: #61dafb;
+      --accent-2: #7ef29a;
+      --warn: #ffd166;
+      --danger: #ff6b6b;
+      --line: #2b3a66;
+      --shadow: 0 14px 30px rgba(0, 0, 0, 0.35);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background: radial-gradient(circle at top right, #172347 0%, var(--bg) 45%, #070b16 100%);
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    .container {
+      width: min(1200px, 92vw);
+      margin: 0 auto;
+      padding: 28px 0 46px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #1d2f63 0%, #182547 60%, #131d37 100%);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      padding: 24px;
+      margin-bottom: 18px;
+      overflow: hidden;
+      position: relative;
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -80px;
+      top: -70px;
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(126, 242, 154, 0.2), rgba(126, 242, 154, 0));
+      pointer-events: none;
+    }
+    h1, h2, h3 { margin: 0 0 10px; }
+    h1 { font-size: clamp(1.6rem, 2.2vw, 2.2rem); }
+    h2 { font-size: 1.25rem; margin-top: 14px; }
+    p { margin: 8px 0; color: var(--muted); }
+    .kpi-row {
+      margin-top: 14px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 10px;
+    }
+    .kpi {
+      background: rgba(11, 16, 32, 0.5);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+    }
+    .kpi b { color: var(--accent-2); font-size: 1.1rem; }
+
+    .grid-2 {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: 1.2fr 1fr;
+    }
+    @media (max-width: 980px) {
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: linear-gradient(180deg, var(--panel) 0%, var(--bg-soft) 100%);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    .workflow {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      position: relative;
+      margin-top: 12px;
+    }
+    @media (max-width: 860px) {
+      .workflow { grid-template-columns: 1fr; }
+    }
+    .node {
+      background: var(--panel-2);
+      border: 1px solid #38508d;
+      border-radius: 12px;
+      padding: 12px;
+      min-height: 160px;
+      position: relative;
+    }
+    .node h3 { font-size: 1rem; margin-bottom: 6px; color: var(--accent); }
+    .node ul {
+      margin: 0;
+      padding-left: 16px;
+      color: var(--muted);
+      font-size: 0.93rem;
+    }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .tab-btn {
+      cursor: pointer;
+      border: 1px solid var(--line);
+      background: #15203f;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 7px 12px;
+      font-size: 0.9rem;
+    }
+    .tab-btn.active {
+      background: #26407d;
+      border-color: #5e8bf9;
+    }
+
+    .tab-content {
+      background: #111932;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px;
+      min-height: 200px;
+    }
+    .tab-content code { color: var(--warn); }
+
+    canvas {
+      width: 100%;
+      max-width: 100%;
+      display: block;
+      background: #0d1429;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      margin-top: 8px;
+    }
+
+    .files {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .file {
+      background: #121a33;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 0.92rem;
+    }
+    .file b { color: var(--accent-2); }
+    .pill {
+      display: inline-block;
+      margin-top: 6px;
+      font-size: 0.8rem;
+      color: #d9e1ff;
+      border: 1px solid #3d4f80;
+      border-radius: 999px;
+      padding: 2px 8px;
+    }
+
+    .footer-note {
+      margin-top: 16px;
+      font-size: 0.88rem;
+      color: #9fb0dd;
+      border-left: 3px solid var(--warn);
+      padding-left: 10px;
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <section class="hero">
+      <h1>Element Identification Pipeline (LIBS + Synthetic Data + NN)</h1>
+      <p>
+        This project generates synthetic LIBS spectra from configurable sample compositions, builds
+        element weight spectra over TE/NE conditions, and trains a neural network to predict
+        element presence/concentration from spectra.
+      </p>
+      <div class="kpi-row">
+        <div class="kpi"><b>Input</b><br>Measured spectra + calibration wavelength</div>
+        <div class="kpi"><b>Generator</b><br>SyntheticLIBSDataset (multiprocessing)</div>
+        <div class="kpi"><b>Features</b><br>Spectra x multi-weights (matrix product)</div>
+        <div class="kpi"><b>Model</b><br>Projection + Hidden FC + Sigmoid outputs</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Graphical Workflow</h2>
+      <p>High-level data flow from source configuration to final prediction.</p>
+      <div class="workflow">
+        <article class="node">
+          <h3>1) Data & Sample Definition</h3>
+          <ul>
+            <li>`read_sample_types.py` loads `Samples_Fe_matrix.xlsx` (Concentrations + Uncertainties).</li>
+            <li>Builds `SAMPLE_TYPES` with concentration ranges.</li>
+            <li>Loads wavelengths from measured JSON using `get_spectra`.</li>
+          </ul>
+        </article>
+        <article class="node">
+          <h3>2) Synthetic/Weight Spectrum Generation</h3>
+          <ul>
+            <li>`Sample_bootstrap.py`: random composition + Te/Ne -> synthetic spectra.</li>
+            <li>`weight_generator.py`: per-element spectra across TE/NE grid.</li>
+            <li>Saves `multi_weights_vacuum.h5` and legacy `element_weights.h5`.</li>
+          </ul>
+        </article>
+        <article class="node">
+          <h3>3) Training & Inference</h3>
+          <ul>
+            <li>`train_nn.py`: features = spectra @ weights.T.</li>
+            <li>Trainable projection: 7700 -> 77, then hidden layer and output.</li>
+            <li>`predict_nn.py`: preprocess input H5, predict per-element probabilities.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="grid-2" style="margin-top: 16px;">
+      <article class="panel">
+        <h2>Interactive Module Details</h2>
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="bootstrap">Sample Bootstrap</button>
+          <button class="tab-btn" data-tab="weights">Weight Generator</button>
+          <button class="tab-btn" data-tab="train">Model Training</button>
+          <button class="tab-btn" data-tab="predict">Prediction</button>
+        </div>
+        <div class="tab-content" id="tab-content"></div>
+      </article>
+
+      <article class="panel">
+        <h2>Feature-Dimension Flow</h2>
+        <p>Animated view of how data shape changes in the NN pipeline.</p>
+        <canvas id="shapeCanvas" width="580" height="280" aria-label="Data shape flow chart"></canvas>
+        <p id="shapeCaption" style="margin-top:10px;color:#c8d4f5;"></p>
+      </article>
+    </section>
+
+    <section class="panel" style="margin-top: 16px;">
+      <h2>Key Files and Responsibilities</h2>
+      <div class="files">
+        <div class="file"><b>Sample_bootstrap.py</b><br>Builds synthetic dataset and spectra table.<br><span class="pill">Synthetic data core</span></div>
+        <div class="file"><b>weight_generator.py</b><br>Creates element weight spectra over TE/NE grid and writes HDF5 outputs.<br><span class="pill">Feature basis builder</span></div>
+        <div class="file"><b>train_nn.py</b><br>Computes features, maps targets, trains PyTorch/NumPy model, saves checkpoint.<br><span class="pill">Model training</span></div>
+        <div class="file"><b>predict_nn.py</b><br>Loads unknown spectra, applies same feature transform and model inference.<br><span class="pill">Deployment inference</span></div>
+        <div class="file"><b>plot_random_synthetic_spectra.py</b><br>Quickly visualizes random synthetic spectra via Plotly HTML output.<br><span class="pill">Visual QA tool</span></div>
+        <div class="file"><b>read_sample_types.py</b><br>Builds sample definitions from spreadsheet and database-validated elements.<br><span class="pill">Config loader</span></div>
+      </div>
+      <p class="footer-note">
+        Note: `train_nn.py` reads `multi_weights_vacuum.h5` while `predict_nn.py` currently expects
+        `multi_weights.h5`. Keep filenames aligned to avoid runtime errors.
+      </p>
+    </section>
+  </main>
+
+  <script>
+    const tabData = {
+      bootstrap: `
+        <h3>Sample Bootstrap (` + "`Sample_bootstrap.py`" + `)</h3>
+        <p>
+          Generates synthetic compositions by sampling each element concentration within min/max
+          ranges, then normalizes each sample row to sum to 1. Adds random plasma parameters:
+          <code>Te</code> (uniform) and <code>Ne</code> (log-uniform).
+        </p>
+        <p>
+          Spectra are generated by summing element contributions from <code>create_spectra()</code>
+          and normalized with <code>unit_norm()</code>. Multiprocessing is used for scale.
+        </p>
+      `,
+      weights: `
+        <h3>Weight Generator (` + "`weight_generator.py`" + `)</h3>
+        <p>
+          Builds per-element "basis spectra" over a grid of plasma conditions:
+          TE (10 values) x NE (10 values). For each TE/NE pair, every element spectrum is generated.
+        </p>
+        <p>
+          Output matrix has shape <code>(n_combos x n_elements, n_wavelengths)</code> and is saved
+          to <code>element_weights/multi_weights_vacuum.h5</code>.
+        </p>
+      `,
+      train: `
+        <h3>Model Training (` + "`train_nn.py`" + `)</h3>
+        <p>
+          Computes features through matrix multiplication:
+          <code>features = synthetic_spectra @ weight_matrix.T</code>.
+        </p>
+        <p>
+          Neural network architecture:
+          <code>7700 -> (projection) 77 -> hidden(256) -> output(77, sigmoid)</code>.
+          Projection matrix is trainable and optimized jointly with network weights.
+        </p>
+      `,
+      predict: `
+        <h3>Prediction (` + "`predict_nn.py`" + `)</h3>
+        <p>
+          Reads unknown spectra from H5 paths, applies preprocessing
+          (<code>unit_norm</code> + <code>movingMinimum</code>), computes feature matrix, and
+          normalizes with training statistics.
+        </p>
+        <p>
+          Model output is element-wise probability in [0,1]. Thresholding controls reported
+          "present" elements, and results can be exported as CSV.
+        </p>
+      `
+    };
+
+    const buttons = Array.from(document.querySelectorAll(".tab-btn"));
+    const content = document.getElementById("tab-content");
+    function setTab(name) {
+      buttons.forEach(btn => btn.classList.toggle("active", btn.dataset.tab === name));
+      content.innerHTML = tabData[name];
+    }
+    buttons.forEach(btn => btn.addEventListener("click", () => setTab(btn.dataset.tab)));
+    setTab("bootstrap");
+
+    const canvas = document.getElementById("shapeCanvas");
+    const ctx = canvas.getContext("2d");
+    const caption = document.getElementById("shapeCaption");
+
+    const stages = [
+      { label: "Input Spectrum", shape: "(n, n_wavelengths)", color: "#61dafb" },
+      { label: "Feature Matrix", shape: "(n, 7700)", color: "#ffd166" },
+      { label: "Projection", shape: "(n, 77)", color: "#7ef29a" },
+      { label: "NN Output", shape: "(n, 77)", color: "#ff6b6b" }
+    ];
+
+    let frame = 0;
+    function draw() {
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      const padX = 24;
+      const boxW = 120;
+      const boxH = 68;
+      const gap = 26;
+      const y = h / 2 - boxH / 2;
+
+      stages.forEach((s, i) => {
+        const x = padX + i * (boxW + gap);
+        const pulse = 0.55 + 0.45 * Math.sin((frame / 18) - i * 0.8);
+        ctx.fillStyle = "rgba(20, 31, 60, 0.9)";
+        ctx.strokeStyle = s.color;
+        ctx.lineWidth = 2 + pulse;
+        ctx.beginPath();
+        ctx.roundRect(x, y, boxW, boxH, 10);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = "#e9eefc";
+        ctx.font = "12px Segoe UI";
+        ctx.fillText(s.label, x + 8, y + 24);
+        ctx.fillStyle = "#aeb9d8";
+        ctx.font = "11px Segoe UI";
+        ctx.fillText(s.shape, x + 8, y + 46);
+
+        if (i < stages.length - 1) {
+          const x1 = x + boxW + 6;
+          const x2 = x + boxW + gap - 6;
+          const midY = y + boxH / 2;
+          const t = (Math.sin(frame / 14 - i) + 1) / 2;
+          const grad = ctx.createLinearGradient(x1, midY, x2, midY);
+          grad.addColorStop(0, "rgba(97,218,251,0.25)");
+          grad.addColorStop(t, "rgba(126,242,154,0.9)");
+          grad.addColorStop(1, "rgba(255,209,102,0.25)");
+          ctx.strokeStyle = grad;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(x1, midY);
+          ctx.lineTo(x2, midY);
+          ctx.stroke();
+
+          ctx.fillStyle = "#c9d4f7";
+          ctx.beginPath();
+          ctx.moveTo(x2, midY);
+          ctx.lineTo(x2 - 8, midY - 5);
+          ctx.lineTo(x2 - 8, midY + 5);
+          ctx.closePath();
+          ctx.fill();
+        }
+      });
+
+      frame += 1;
+      caption.textContent =
+        "Flow: measured/synthetic spectra -> matrix multiplication with multi-weights -> learned projection -> per-element probabilities.";
+      requestAnimationFrame(draw);
+    }
+    draw();
+  </script>
+</body>
+</html>
