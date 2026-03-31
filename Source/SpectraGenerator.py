@@ -12,11 +12,11 @@ c = const.c                # m/s
 e = const.e                # C
 me = const.electron_mass * 1000  # g
 
-print(f"kb: {kb}")
-print(f"h: {h}")
-print(f"c: {c}")
-print(f"e: {e}")
-print(f"me: {me}")
+#print(f"kb: {kb}")
+#print(f"h: {h}")
+#print(f"c: {c}")
+#print(f"e: {e}")
+#print(f"me: {me}")
 
 # ---------------------------------------------------------------------------
 # Module-level caches (populated lazily, survive the whole process lifetime)
