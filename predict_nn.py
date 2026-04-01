@@ -1,15 +1,14 @@
 """
-Element Identification Prediction Script (Classification Model)
+Element Identification Prediction Script (Transformer Model)
 
 This script:
 1. Loads spectra from an input JSON file (reads both CCD ranges via get_spectra)
-2. Loads multi-weight spectra from element_weights/multi_weights_vacuum.h5
-3. Performs matrix multiplication: spectra @ weights.T  -> (n_samples, 7700)
-4. Loads trained classification model (per-element branches, 1000 bins each)
-5. Predicts concentration bin for each element, converts to concentration %
+2. Loads trained Transformer model (element_transformer_model.pt)
+3. Converts spectra to spectral tokens [intensity, wavelength]
+4. Predicts concentration bin for each element, converts to concentration %
 
 Prerequisite:
-    Run weight_generator.py first, then train_nn_classification.py.
+    Run train_nn_autotransformer.py first.
 
 Usage:
     python predict_nn.py <input_json_file>
@@ -18,32 +17,23 @@ Usage:
 """
 
 import numpy as np
-import h5py
 import os
-import pickle
 import sys
 from Sample_bootstrap import unit_norm
 from LIBSmethods import movingMinimum
 from readData import get_spectra, json_from_file, get_number_of_runs, is_run_valid
 
-# Try to import PyTorch
-try:
-    import torch
-    import torch.nn as nn
-    HAS_TORCH = True
-except ImportError:
-    HAS_TORCH = False
+import torch
+import torch.nn as nn
 
 # ============================================================================
 # Configuration
 # ============================================================================
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-MULTI_WEIGHTS_PATH = os.path.join(SCRIPT_DIR, 'element_weights', 'multi_weights_vacuum.h5')
-MODEL_PT_PATH = os.path.join(SCRIPT_DIR, 'element_classification_model.pt')
-MODEL_PKL_PATH = os.path.join(SCRIPT_DIR, 'element_classification_model.pkl')
+MODEL_PATH = os.path.join(SCRIPT_DIR, 'element_transformer_model.pt')
 N_BINS = 1000
-DEFAULT_THRESHOLD = 0.1  # concentration fraction; elements above this are "detected"
+DEFAULT_THRESHOLD = 0.1
 
 
 # ============================================================================
@@ -54,107 +44,101 @@ def bin_to_concentration(bin_idx):
     """Convert bin index [0, N_BINS-1] to concentration fraction [0.0, 1.0]."""
     return np.asarray(bin_idx, dtype=np.float64) / (N_BINS - 1)
 
-
 # ============================================================================
-# Neural Network Definitions (for inference)
+# Neural Network Definitions (must match train_nn_autotransformer.py)
 # ============================================================================
 
-def relu(x):
-    return np.maximum(0, x)
+class SpectralEmbedding(nn.Module):
+    """Project each 2D spectral token [intensity, wavelength] to d_model dimensions."""
 
-def np_softmax(x):
-    shifted = x - np.max(x, axis=-1, keepdims=True)
-    exp_x = np.exp(shifted)
-    return exp_x / np.sum(exp_x, axis=-1, keepdims=True)
+    def __init__(self, d_model):
+        super().__init__()
+        self.linear = nn.Linear(2, d_model)
 
-
-class NumpyBranchNN:
-    """NumPy classification NN with per-element branches for inference."""
-
-    def __init__(self, W0, W1, b1, branch_W1, branch_b1, branch_W2, branch_b2):
-        self.W0 = W0
-        self.W1, self.b1 = W1, b1
-        self.branch_W1 = branch_W1
-        self.branch_b1 = branch_b1
-        self.branch_W2 = branch_W2
-        self.branch_b2 = branch_b2
-        self.n_elements = len(branch_W1)
-
-    def predict(self, X):
-        """Returns (n_samples, n_elements, n_bins) logits."""
-        P = X @ self.W0
-        Z1 = P @ self.W1 + self.b1
-        A1 = relu(Z1)
-
-        branch_outputs = []
-        for e in range(self.n_elements):
-            bz1 = A1 @ self.branch_W1[e] + self.branch_b1[e]
-            ba1 = relu(bz1)
-            logits = ba1 @ self.branch_W2[e] + self.branch_b2[e]
-            branch_outputs.append(logits)
-
-        return np.stack(branch_outputs, axis=1)
+    def forward(self, x):
+        return self.linear(x)
 
 
-if HAS_TORCH:
-    class ElementBranchNN(nn.Module):
-        """PyTorch classification NN with per-element branches, matching train_nn_classification.py."""
+class SinusoidalPositionalEncoding(nn.Module):
+    """Fixed sinusoidal positional encoding (not learned)."""
 
-        def __init__(self, n_features, n_elements, n_hidden, branch_hidden,
-                     n_bins=N_BINS, dropout=0.0):
-            super().__init__()
-            self.n_elements = n_elements
-            self.n_bins = n_bins
+    def __init__(self, d_model, max_len=5000):
+        super().__init__()
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len).unsqueeze(1).float()
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2).float()
+            * (-torch.log(torch.tensor(10000.0)) / d_model)
+        )
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
 
-            self.projection = nn.Linear(n_features, n_elements, bias=False)
-            self.shared = nn.Sequential(
-                nn.Linear(n_elements, n_hidden),
-                nn.BatchNorm1d(n_hidden),
+    def forward(self, x):
+        return self.pe[:x.size(1)]
+
+
+class SpectralTransformerNN(nn.Module):
+    """
+    Transformer encoder for spectral element classification.
+
+    Input:  (batch, seq_len, 2) spectral tokens [intensity, wavelength]
+    Output: (batch, n_elements, n_bins) logits per element
+    """
+
+    def __init__(self, d_model, n_heads, n_layers, dim_ff, n_elements,
+                 branch_hidden, n_bins=N_BINS, max_seq_len=2048, dropout=0.1):
+        super().__init__()
+        self.n_elements = n_elements
+        self.n_bins = n_bins
+
+        self.embedding = SpectralEmbedding(d_model)
+        self.pos_encoding = SinusoidalPositionalEncoding(d_model, max_seq_len + 100)
+        self.embed_dropout = nn.Dropout(dropout)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=n_heads,
+            dim_feedforward=dim_ff,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+        self.pool_norm = nn.LayerNorm(d_model)
+
+        self.branches = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(d_model, branch_hidden),
                 nn.ReLU(),
-                nn.Dropout(dropout),
+                nn.Linear(branch_hidden, n_bins),
             )
-            self.branches = nn.ModuleList([
-                nn.Sequential(
-                    nn.Linear(n_hidden, branch_hidden),
-                    nn.ReLU(),
-                    nn.Linear(branch_hidden, n_bins),
-                )
-                for _ in range(n_elements)
-            ])
+            for _ in range(n_elements)
+        ])
 
-        def forward(self, x):
-            x = self.projection(x)
-            shared = self.shared(x)
-            return torch.stack([branch(shared) for branch in self.branches], dim=1)
+    def forward(self, x):
+        x = self.embedding(x)
+        x = x + self.pos_encoding(x)
+        x = self.embed_dropout(x)
+        x = self.transformer(x)
+        x = self.pool_norm(x.mean(dim=1))
+        return torch.stack([branch(x) for branch in self.branches], dim=1)
 
 
 # ============================================================================
 # Data Loading
 # ============================================================================
 
-def load_multi_weights():
-    """Load multi-weight spectra from element_weights/multi_weights_vacuum.h5"""
-    if not os.path.exists(MULTI_WEIGHTS_PATH):
-        print(f"\nERROR: Multi-weight file not found: {MULTI_WEIGHTS_PATH}")
-        print("Please run weight_generator.py first to generate the weight spectra.")
-        sys.exit(1)
-
-    with h5py.File(MULTI_WEIGHTS_PATH, 'r') as f:
-        weight_matrix = f['weight_matrix'][:]
-        unique_elements = [e.decode('utf-8') for e in f['unique_elements'][:]]
-
-    return weight_matrix, unique_elements
-
-
 def load_input_spectra(json_path):
     """
-    Load spectra from an input JSON file.
+    Load spectra and wavelengths from an input JSON file.
 
     For each valid run, reads both CCD ranges via get_spectra (same approach
-    as Sample_bootstrap.py lines 42-46), concatenates them, and applies
+    as Sample_bootstrap.py), concatenates them, and applies
     unit_norm + movingMinimum normalization.
 
-    Returns (spectra, n_valid_runs) where spectra is (n_runs, n_wavelengths).
+    Returns (spectra, wavelength, n_valid_runs) where
+        spectra is (n_runs, n_wavelengths) and
+        wavelength is (n_wavelengths,).
     """
     if not os.path.exists(json_path):
         print(f"\nERROR: File not found: {json_path}")
@@ -165,6 +149,7 @@ def load_input_spectra(json_path):
     n_runs = get_number_of_runs(j)
 
     spectra_list = []
+    wavelength = None
     for run_id in range(1, n_runs + 1):
         if not is_run_valid(j, run_id):
             continue
@@ -172,6 +157,8 @@ def load_input_spectra(json_path):
             w1, spectraData_1 = get_spectra(json_path, run_id, 1, 1)
             w2, spectraData_2 = get_spectra(json_path, run_id, 1, 2)
             spectrum = np.concatenate([spectraData_1, spectraData_2])
+            if wavelength is None:
+                wavelength = np.concatenate([w1, w2])
             spectrum = unit_norm(spectrum)
             spectrum = movingMinimum(spectrum)
             spectra_list.append(spectrum)
@@ -186,83 +173,86 @@ def load_input_spectra(json_path):
     if spectra.ndim == 1:
         spectra = spectra.reshape(1, -1)
 
-    return spectra, len(spectra_list)
+    return spectra, wavelength, len(spectra_list)
+
+
+def prepare_spectral_tokens(spectra, wavelength, max_seq_len, wl_min, wl_max):
+    """
+    Convert spectra to token representation: token_i = [intensity_i, wavelength_i].
+
+    Uses saved wl_min/wl_max from training for consistent wavelength normalization.
+    If the spectrum is longer than max_seq_len, adjacent points are averaged (binned).
+
+    Returns tokens: (n_samples, seq_len, 2) float32
+    """
+    n_samples, n_wl = spectra.shape
+    wl = wavelength.copy().astype(np.float64)
+    spec = spectra.copy()
+
+    if max_seq_len and n_wl > max_seq_len:
+        bin_size = n_wl // max_seq_len
+        actual_len = max_seq_len * bin_size
+        spec = spec[:, :actual_len].reshape(n_samples, max_seq_len, bin_size).mean(axis=2)
+        wl = wl[:actual_len].reshape(max_seq_len, bin_size).mean(axis=1)
+
+    wl_norm = ((wl - wl_min) / (wl_max - wl_min + 1e-10)).astype(np.float32)
+
+    tokens = np.zeros((n_samples, len(wl), 2), dtype=np.float32)
+    tokens[:, :, 0] = spec
+    tokens[:, :, 1] = wl_norm[np.newaxis, :]
+
+    return tokens
 
 
 def load_model():
     """
-    Load trained classification model. Tries PyTorch (.pt) first, then NumPy (.pkl).
+    Load trained transformer model from element_transformer_model.pt.
 
-    Returns (predict_fn, feature_mean, feature_std, weight_elements)
-    where predict_fn(X) returns (n_samples, n_elements, n_bins) logits.
+    Returns (model, checkpoint) where model is in eval mode on CPU.
     """
-    # Try PyTorch model first
-    if HAS_TORCH and os.path.exists(MODEL_PT_PATH):
-        print(f"  Loading PyTorch model: {MODEL_PT_PATH}")
-        checkpoint = torch.load(MODEL_PT_PATH, map_location='cpu', weights_only=False)
-        cfg = checkpoint['config']
-        model = ElementBranchNN(
-            cfg['n_features'], cfg['n_elements'], cfg['n_hidden'],
-            cfg['branch_hidden'], cfg.get('n_bins', N_BINS),
-        )
-        model.load_state_dict(checkpoint['model_state_dict'])
-        model.eval()
+    if not os.path.exists(MODEL_PATH):
+        print(f"\nERROR: No trained model found: {MODEL_PATH}")
+        print("Please run train_nn_autotransformer.py first.")
+        sys.exit(1)
 
-        def predict_fn(X):
-            with torch.no_grad():
-                return model(torch.FloatTensor(X)).numpy()
+    print(f"  Loading model: {MODEL_PATH}")
+    checkpoint = torch.load(MODEL_PATH, map_location='cpu', weights_only=False)
+    cfg = checkpoint['config']
 
-        return (predict_fn,
-                checkpoint['feature_mean'],
-                checkpoint['feature_std'],
-                checkpoint['weight_elements'])
+    model = SpectralTransformerNN(
+        d_model=cfg['d_model'],
+        n_heads=cfg['n_heads'],
+        n_layers=cfg['n_layers'],
+        dim_ff=cfg['dim_ff'],
+        n_elements=cfg['n_elements'],
+        branch_hidden=cfg['branch_hidden'],
+        n_bins=cfg.get('n_bins', N_BINS),
+        max_seq_len=cfg['max_seq_len'],
+        dropout=cfg.get('dropout', 0.1),
+    )
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.eval()
 
-    # Fall back to NumPy model
-    if os.path.exists(MODEL_PKL_PATH):
-        print(f"  Loading NumPy model: {MODEL_PKL_PATH}")
-        with open(MODEL_PKL_PATH, 'rb') as f:
-            data = pickle.load(f)
-
-        model = NumpyBranchNN(
-            data['W0'], data['W1'], data['b1'],
-            data['branch_W1'], data['branch_b1'],
-            data['branch_W2'], data['branch_b2'],
-        )
-        return (model.predict,
-                data['feature_mean'],
-                data['feature_std'],
-                data['weight_elements'])
-
-    print(f"\nERROR: No trained model found!")
-    print(f"  Looked for: {MODEL_PT_PATH}")
-    print(f"           or {MODEL_PKL_PATH}")
-    print("Please run train_nn_classification.py first.")
-    sys.exit(1)
+    return model, checkpoint
 
 
 # ============================================================================
 # Prediction
 # ============================================================================
 
-def predict_elements(spectra, weight_matrix, predict_fn, feature_mean, feature_std):
+def predict_elements(tokens, model):
     """
-    Predict element concentrations for input spectra.
+    Predict element concentrations from spectral tokens.
 
     Returns:
         concentrations: (n_samples, n_elements) predicted concentration fractions [0, 1]
         pred_bins:      (n_samples, n_elements) predicted bin indices [0, N_BINS-1]
     """
-    features = spectra @ weight_matrix.T
-    features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+    with torch.no_grad():
+        logits = model(torch.FloatTensor(tokens)).numpy()
 
-    std_safe = feature_std.copy()
-    std_safe[std_safe == 0] = 1
-    features_norm = (features - feature_mean) / std_safe
-    features_norm = np.nan_to_num(features_norm, nan=0.0, posinf=0.0, neginf=0.0)
-
-    logits = predict_fn(features_norm)           # (n_samples, n_elements, n_bins)
-    pred_bins = np.argmax(logits, axis=2)         # (n_samples, n_elements)
-    concentrations = bin_to_concentration(pred_bins)  # (n_samples, n_elements) in [0, 1]
+    pred_bins = np.argmax(logits, axis=2)
+    concentrations = bin_to_concentration(pred_bins)
 
     return concentrations, pred_bins
 
@@ -344,39 +334,39 @@ def main():
             i += 1
 
     print("=" * 70)
-    print("Element Identification - Classification Model Prediction")
+    print("Element Identification - Transformer Model Prediction")
     print("=" * 70)
 
-    # 1. Load multi-weight spectra
-    print(f"\nLoading weight spectra from: {MULTI_WEIGHTS_PATH}")
-    weight_matrix, weight_elements = load_multi_weights()
-    print(f"  Weight matrix: {weight_matrix.shape}")
-    print(f"  Elements: {len(weight_elements)}")
-
-    # 2. Load model
+    # 1. Load model
     print(f"\nLoading trained model...")
-    predict_fn, feature_mean, feature_std, model_elements = load_model()
-    print("  Model loaded successfully")
+    model, checkpoint = load_model()
+    cfg = checkpoint['config']
+    element_names = checkpoint['elements']
+    print(f"  Model loaded successfully")
+    print(f"  Elements: {len(element_names)}")
+    print(f"  Transformer: d_model={cfg['d_model']}, heads={cfg['n_heads']}, "
+          f"layers={cfg['n_layers']}")
 
-    # 3. Load input spectra from JSON
+    # 2. Load input spectra from JSON
     print(f"\nLoading input spectra from: {input_file}")
-    input_spectra, n_valid_runs = load_input_spectra(input_file)
+    input_spectra, wavelength, n_valid_runs = load_input_spectra(input_file)
     print(f"  Valid runs: {n_valid_runs}")
-    print(f"  Shape: {input_spectra.shape}")
+    print(f"  Spectra shape: {input_spectra.shape}")
+    print(f"  Wavelength range: [{wavelength.min():.2f}, {wavelength.max():.2f}] nm")
 
-    if input_spectra.shape[1] != weight_matrix.shape[1]:
-        print(f"\nERROR: Wavelength mismatch!")
-        print(f"  Input: {input_spectra.shape[1]} wavelengths")
-        print(f"  Weights: {weight_matrix.shape[1]} wavelengths")
-        print("Regenerate weights (weight_generator.py) with matching wavelength calibration.")
-        sys.exit(1)
+    # 3. Prepare spectral tokens
+    print(f"\nPreparing spectral tokens...")
+    tokens = prepare_spectral_tokens(
+        input_spectra, wavelength,
+        max_seq_len=cfg['max_seq_len'],
+        wl_min=checkpoint['wl_min'],
+        wl_max=checkpoint['wl_max'],
+    )
+    print(f"  Token shape: {tokens.shape}")
 
     # 4. Predict
     print(f"\nComputing predictions...")
-    print(f"  Features: {input_spectra.shape[0]} spectra x {weight_matrix.shape[0]} weights")
-    concentrations, pred_bins = predict_elements(
-        input_spectra, weight_matrix, predict_fn, feature_mean, feature_std
-    )
+    concentrations, pred_bins = predict_elements(tokens, model)
     print(f"  Predictions: {concentrations.shape}")
 
     # 5. Output summary
@@ -387,13 +377,13 @@ def main():
     for i in range(concentrations.shape[0]):
         conc = concentrations[i]
         detected = [
-            (weight_elements[j], conc[j])
+            (element_names[j], conc[j])
             for j in range(len(conc)) if conc[j] > threshold
         ]
         detected.sort(key=lambda x: x[1], reverse=True)
         top_idx = np.argsort(conc)[::-1][:5]
         top_str = ', '.join([
-            f"{weight_elements[j]}:{conc[j]*100:.1f}%" for j in top_idx
+            f"{element_names[j]}:{conc[j]*100:.1f}%" for j in top_idx
         ])
         print(f"\nSpectrum #{i+1}:")
         print(f"  Detected ({len(detected)}): "
@@ -401,15 +391,15 @@ def main():
         print(f"  Top 5: {top_str}")
 
     if output_file:
-        save_to_csv(concentrations, weight_elements, output_file)
+        save_to_csv(concentrations, element_names, output_file)
 
-    print_spectrum_prediction(concentrations[0], weight_elements, 0, threshold)
+    print_spectrum_prediction(concentrations[0], element_names, 0, threshold)
 
     print("\n" + "=" * 70)
     print("Prediction Complete!")
     print("=" * 70)
 
-    return concentrations, weight_elements
+    return concentrations, element_names
 
 
 if __name__ == "__main__":
