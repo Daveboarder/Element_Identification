@@ -47,12 +47,12 @@ data = np.concatenate([spectraData_1, spectraData_2])
 
 
 # Plasma temperature range (Kelvin)
-TE_MIN = 8000
-TE_MAX = 20000
+TE_MIN = 6500
+TE_MAX = 11000
 
 # Electron number density range (cm^-3)
-NE_MIN = 1e16
-NE_MAX = 1e19
+NE_MIN = 1e17
+NE_MAX = 5e17
 
 # Elements that are invalid or should be excluded from database
 EXCLUDED_ELEMENTS = {'', 'n', 'r'}
