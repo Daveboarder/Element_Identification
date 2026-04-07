@@ -11,19 +11,13 @@ CONCENTRATION = 1
 OPTICAL_PATH_LENGTH = 1.4e-04
 NUMBER_DENSITY = 1e-4
 
-h5_path = os.path.join('test_temporary.h5')
-with h5py.File(h5_path, 'w') as f:
-    f.create_group('measurements')
-    f.create_group('measurements/Measurement_1')
-    f.create_group('measurements/Measurement_1/libs')
-    f.create_group('measurements/Measurement_1/libs/metadata')
-
-    f.create_dataset('measurements/Measurement_1/libs/data', data=weight_spectra)
-    f.create_dataset('measurements/Measurement_1/libs/calibration', data=wavelength)
-    # Encode strings as bytes for HDF5 compatibility
-    elements_encoded = np.array(elements, dtype='S10')
-    f.create_dataset('measurements/Measurement_1/libs/metadata/elements', data=elements_encoded)
-    print(f"Combined HDF5 file saved to: {h5_path}")
+h5_path = '/mnt/data/projects/Running_projects/24_0053_CM24_111/Data/Li_some random data/2022_09_20_Buday_Li Kal'
+#read all h5 files in the folder
+#os.path.join('test_temporary.h5')
+h5_files = [f for f in os.listdir(h5_path) if f.endswith('.h5')]
+for file in h5_files:
+    with h5py.File(os.path.join(h5_path, file), 'r') as f:
+        print(f.keys())
 
 def print_hdf5_tree(name, obj, prefix="", is_last=True):
     """Print HDF5 structure as a tree"""
@@ -37,8 +31,9 @@ def print_hdf5_tree(name, obj, prefix="", is_last=True):
             extension = "    " if is_last else "│   "
             print_hdf5_tree(f"{name}/{key}", value, prefix + extension, is_last_item)
 
-# Check structure of element_weights.h5
-element_weights_path = os.path.join(os.path.dirname(__file__), '..', 'element_weights', 'element_weights.h5')
+# Check structure of first h5 file in the h5_path
+element_weights_path = os.path.join(h5_path, h5_files[0])
+#element_weights_path = os.path.join(os.path.dirname(__file__), '..', 'element_weights', 'element_weights.h5')
 with h5py.File(element_weights_path, 'r') as f:
     print(f"\nHDF5 file structure: {element_weights_path}")
     print("=" * 50)
