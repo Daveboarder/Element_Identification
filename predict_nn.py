@@ -16,6 +16,7 @@ Usage:
     python predict_nn.py <input_json_file> --threshold 0.1
 """
 
+import json
 import numpy as np
 import os
 import sys
@@ -31,7 +32,9 @@ import torch.nn as nn
 # ============================================================================
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(SCRIPT_DIR, 'element_transformer_model.pt')
+EXPERIMENT_NAME = "element_transformer_test_v5"
+MODEL_PATH = os.path.join(SCRIPT_DIR, "experiments", EXPERIMENT_NAME, "best_model.pt")
+VALIDATION_PATH = os.path.join(SCRIPT_DIR, "experiments", EXPERIMENT_NAME, "validation")
 N_BINS = 1000
 DEFAULT_THRESHOLD = 0.1
 
@@ -206,7 +209,11 @@ def prepare_spectral_tokens(spectra, wavelength, max_seq_len, wl_min, wl_max):
 
 def load_model():
     """
-    Load trained transformer model from element_transformer_model.pt.
+    Load trained transformer model from the experiment folder.
+
+    Supports both the full checkpoint format (dict with 'config' key, produced
+    by the current training script) and the legacy format (raw state_dict only).
+    In the legacy case, reads config.json from the experiment folder as fallback.
 
     Returns (model, checkpoint) where model is in eval mode on CPU.
     """
@@ -217,7 +224,42 @@ def load_model():
 
     print(f"  Loading model: {MODEL_PATH}")
     checkpoint = torch.load(MODEL_PATH, map_location='cpu', weights_only=False)
-    cfg = checkpoint['config']
+
+    # Handle legacy format: checkpoint is raw state_dict or missing 'config' key
+    if not isinstance(checkpoint, dict) or 'config' not in checkpoint:
+        config_json_path = os.path.join(os.path.dirname(MODEL_PATH), 'config.json')
+        if not os.path.exists(config_json_path):
+            print(f"\nERROR: Checkpoint missing 'config' key and no config.json found:")
+            print(f"  {config_json_path}")
+            print("Please retrain the model (run train_nn_autotransformer.py).")
+            sys.exit(1)
+        with open(config_json_path) as f:
+            json_cfg = json.load(f)
+        cfg = {
+            'd_model': json_cfg['d_model'],
+            'n_heads': json_cfg['n_heads'],
+            'n_layers': json_cfg['n_encoder_layers'],
+            'dim_ff': json_cfg['dim_feedforward'],
+            'n_elements': json_cfg['n_elements'],
+            'branch_hidden': json_cfg['branch_hidden_size'],
+            'n_bins': json_cfg.get('n_bins', N_BINS),
+            'max_seq_len': json_cfg['seq_len'],
+            'dropout': json_cfg.get('dropout', 0.1),
+        }
+        # Wrap a bare state_dict into the expected checkpoint structure
+        if not isinstance(checkpoint, dict) or 'model_state_dict' not in checkpoint:
+            state_dict = checkpoint
+        else:
+            state_dict = checkpoint['model_state_dict']
+        checkpoint = {
+            'model_state_dict': state_dict,
+            'config': cfg,
+            'elements': json_cfg['elements'],
+            'wl_min': json_cfg['wl_min'],
+            'wl_max': json_cfg['wl_max'],
+        }
+    else:
+        cfg = checkpoint['config']
 
     model = SpectralTransformerNN(
         d_model=cfg['d_model'],
@@ -390,8 +432,10 @@ def main():
               f"{[(e, f'{c*100:.1f}%') for e, c in detected] if detected else 'None'}")
         print(f"  Top 5: {top_str}")
 
+    os.makedirs(VALIDATION_PATH, exist_ok=True)
     if output_file:
-        save_to_csv(concentrations, element_names, output_file)
+        output_path = os.path.join(VALIDATION_PATH, output_file)
+        save_to_csv(concentrations, element_names, output_path)
 
     print_spectrum_prediction(concentrations[0], element_names, 0, threshold)
 

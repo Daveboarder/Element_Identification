@@ -18,6 +18,8 @@ import sqlite3
 import os
 import sys
 import h5py
+import hashlib
+import json
 import torch
 from torch.utils.data import Dataset  # type: ignore[import-not-found]
 
@@ -35,11 +37,13 @@ from readData import get_spectra  # type: ignore[import-not-found]
 # Database path
 DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'Source', 'LIBS_data_vacuum.db')
 
-# Number of synthetic samples to generate
-N_SAMPLES = 100
+# Parameters
+N_SAMPLES = 10  # Number of synthetic samples to generate
+N_WORKERS = 4 # Number of parallel workers for spectrum generation (set to 1 to disable multiprocessing)
 
 #read sample wavelengths from json file
 file_path = '/mnt/data/projects/Running_projects/26_0128_Element_Identification/Methods/Element_Identification-1/Data/VASKUT K8.json'
+file_path = "Data/VASKUT K8.json"
 w1, spectraData_1 = get_spectra(file_path, 1, 1, 1)
 w2, spectraData_2 = get_spectra(file_path, 1, 1, 2)
 wavelength = np.concatenate([w1, w2])
@@ -380,16 +384,71 @@ class SyntheticLIBSDataset(Dataset):
                  db_path: str = DATABASE_PATH,
                  te_range: tuple = (TE_MIN, TE_MAX),
                  ne_range: tuple = (NE_MIN, NE_MAX),
-                 verbose: bool = True):
+                 verbose: bool = True,
+                 cache_dir: str = None):
         self.sample_types = sample_types
         self.wavelength = wavelength
         self.db_path = db_path
         self.te_range = te_range
         self.ne_range = ne_range
         self.verbose = verbose
+        self.cache_dir = cache_dir or os.path.join(os.path.dirname(__file__), 'Data')
         self.sample_table, self.spectra = self._generate_all()
 
+    # ------------------------------------------------------------------
+    # Cache helpers
+    # ------------------------------------------------------------------
+
+    def _cache_path(self) -> str:
+        """Return a deterministic HDF5 cache path derived from the current config."""
+        config = {
+            'sample_types': self.sample_types,
+            'te_range': list(self.te_range),
+            'ne_range': [float(self.ne_range[0]), float(self.ne_range[1])],
+        }
+        config_str = json.dumps(config, sort_keys=True, default=str)
+        key = hashlib.md5(config_str.encode()).hexdigest()[:12]
+        os.makedirs(self.cache_dir, exist_ok=True)
+        return os.path.join(self.cache_dir, f'synthetic_cache_{key}.h5')
+
+    def _save_cache(self, sample_table: pd.DataFrame, spectra: np.ndarray, path: str) -> None:
+        """Persist spectra and sample_table to an HDF5 file."""
+        with h5py.File(path, 'w') as f:
+            f.create_dataset('spectra', data=spectra, compression='gzip')
+            grp = f.create_group('sample_table')
+            grp.attrs['columns'] = json.dumps(list(sample_table.columns))
+            str_dt = h5py.string_dtype()
+            for col in sample_table.columns:
+                col_data = sample_table[col].values
+                if col_data.dtype.kind in ('U', 'O'):  # string columns
+                    grp.create_dataset(col, data=list(col_data), dtype=str_dt)
+                else:
+                    grp.create_dataset(col, data=col_data)
+
+    def _load_cache(self, path: str) -> tuple[pd.DataFrame, np.ndarray]:
+        """Load spectra and sample_table from an HDF5 cache file."""
+        with h5py.File(path, 'r') as f:
+            spectra = f['spectra'][:]
+            grp = f['sample_table']
+            columns = json.loads(grp.attrs['columns'])
+            data = {}
+            for col in columns:
+                col_data = grp[col][:]
+                if col_data.dtype.kind == 'S' or col_data.dtype.kind == 'O':
+                    col_data = [
+                        s.decode('utf-8') if isinstance(s, bytes) else s
+                        for s in col_data
+                    ]
+                data[col] = col_data
+        return pd.DataFrame(data), spectra
+
     def _generate_all(self) -> tuple[pd.DataFrame, np.ndarray]:
+        cache_path = self._cache_path()
+        if os.path.isfile(cache_path):
+            if self.verbose:
+                print(f"Loading cached spectra from: {cache_path}")
+            return self._load_cache(cache_path)
+
         # Phase 1 -- build all sample tables (fast, sequential)
         all_sample_tables = []
         for i, sample_type in enumerate(self.sample_types):
@@ -430,7 +489,12 @@ class SyntheticLIBSDataset(Dataset):
             wavelength=self.wavelength,
             db_path=self.db_path,
             verbose=self.verbose,
+            n_workers=N_WORKERS
         )
+
+        self._save_cache(combined_sample_table, combined_spectra, cache_path)
+        if self.verbose:
+            print(f"Spectra cached to: {cache_path}")
 
         return combined_sample_table, combined_spectra
 

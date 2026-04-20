@@ -21,10 +21,12 @@ Architecture:
 Requires PyTorch (no NumPy fallback for transformer).
 """
 
+import json
 import numpy as np
 import os
 import sys
 import Sample_bootstrap as sample_bootstrap
+import mlflow  # type: ignore[import-not-found]
 
 import torch  # type: ignore[import-not-found]
 import torch.nn as nn  # type: ignore[import-not-found]
@@ -35,19 +37,22 @@ from torch.utils.data import DataLoader, TensorDataset  # type: ignore[import-no
 # Configuration
 # ============================================================================
 
+EXPERIMENT_NAME = "element_transformer_test_v5"
+DATA_PATH = os.path.join("experiments", EXPERIMENT_NAME)
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 N_BINS = 1000
 D_MODEL = 128
-N_HEADS = 4
-N_ENCODER_LAYERS = 4
+N_HEADS = 8
+N_ENCODER_LAYERS = 2
 DIM_FEEDFORWARD = 512
 DROPOUT = 0.1
 MAX_SEQ_LEN = 2048
 BRANCH_HIDDEN_SIZE = 128
 LEARNING_RATE = 1e-4
-EPOCHS = 500
-BATCH_SIZE = 8
+EPOCHS = 10
+BATCH_SIZE = 32
 TEST_SPLIT = 0.2
 RANDOM_SEED = 17
 
@@ -92,7 +97,7 @@ def load_synthetic_data(batch_size=64):
         db_path=sample_bootstrap.DATABASE_PATH,
         te_range=(sample_bootstrap.TE_MIN, sample_bootstrap.TE_MAX),
         ne_range=(sample_bootstrap.NE_MIN, sample_bootstrap.NE_MAX),
-        verbose=False
+        verbose=True
     )
 
     if len(synthetic_dataset) == 0:
@@ -292,7 +297,34 @@ def train_model(model, train_loader, val_loader, epochs):
     best_val_loss = float('inf')
     best_state = None
 
+    # Ensure DATA_PATH directory exists for saving epoch weights
+    os.makedirs(DATA_PATH, exist_ok=True)
+
+    # --- MLflow: start a new run and log training parameters ---
+    mlflow.set_experiment("element_transformer")
+    run = mlflow.start_run(run_name=EXPERIMENT_NAME)
+    mlflow.log_params({
+        "epochs": epochs,
+        "learning_rate": LEARNING_RATE,
+        "batch_size": BATCH_SIZE,
+        "n_bins": N_BINS,
+        "d_model": D_MODEL,
+        "n_heads": N_HEADS,
+        "n_encoder_layers": N_ENCODER_LAYERS,
+        "dim_feedforward": DIM_FEEDFORWARD,
+        "dropout": DROPOUT,
+        "max_seq_len": MAX_SEQ_LEN,
+        "branch_hidden_size": BRANCH_HIDDEN_SIZE,
+        "learning_rate": LEARNING_RATE,
+        "epochs": EPOCHS,
+        "batch_size": BATCH_SIZE,
+        "test_split": TEST_SPLIT,
+        "random_seed": RANDOM_SEED,
+        "experiment_name": EXPERIMENT_NAME,
+    })
+
     print(f"\nTraining on {device}...")
+    print(f"MLflow run id: {run.info.run_id}")
     print("-" * 90)
 
     for epoch in range(epochs):
@@ -356,6 +388,9 @@ def train_model(model, train_loader, val_loader, epochs):
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_state = {k: v.clone() for k, v in model.state_dict().items()}
+            # Save best model weights
+            best_model_path = os.path.join(DATA_PATH, "best_model.pt")
+            torch.save(model.state_dict(), best_model_path)
 
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss)
@@ -363,6 +398,16 @@ def train_model(model, train_loader, val_loader, epochs):
         history['val_acc'].append(val_acc)
         history['train_mae'].append(train_mae)
         history['val_mae'].append(val_mae)
+
+        # --- MLflow: log per-epoch metrics ---
+        mlflow.log_metrics({
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+            "train_acc": train_acc,
+            "val_acc": val_acc,
+            "train_mae": train_mae,
+            "val_mae": val_mae,
+        }, step=epoch)
 
         if (epoch + 1) % 50 == 0 or epoch == 0:
             lr = optimizer.param_groups[0]['lr']
@@ -376,6 +421,7 @@ def train_model(model, train_loader, val_loader, epochs):
 
     if best_state:
         model.load_state_dict(best_state)
+    mlflow.end_run()
     print("-" * 90)
     return history
 
@@ -535,7 +581,35 @@ if __name__ == "__main__":
           f"{D_MODEL} -> {BRANCH_HIDDEN_SIZE} -> {N_BINS} logits")
     print(f"  Total parameters: {n_params:,}")
 
-    # 8. Create data loaders
+    # 8. Save config.json before training so it is available even if training fails
+    os.makedirs(DATA_PATH, exist_ok=True)
+    config_json = {
+        'experiment_name': EXPERIMENT_NAME,
+        'n_bins': N_BINS,
+        'd_model': D_MODEL,
+        'n_heads': N_HEADS,
+        'n_encoder_layers': N_ENCODER_LAYERS,
+        'dim_feedforward': DIM_FEEDFORWARD,
+        'dropout': DROPOUT,
+        'max_seq_len': MAX_SEQ_LEN,
+        'branch_hidden_size': BRANCH_HIDDEN_SIZE,
+        'learning_rate': LEARNING_RATE,
+        'epochs': EPOCHS,
+        'batch_size': BATCH_SIZE,
+        'test_split': TEST_SPLIT,
+        'random_seed': RANDOM_SEED,
+        'n_elements': int(n_elements),
+        'seq_len': int(seq_len),
+        'wl_min': float(wl_min),
+        'wl_max': float(wl_max),
+        'elements': list(synth_elements),
+    }
+    config_json_path = os.path.join(DATA_PATH, 'config.json')
+    with open(config_json_path, 'w') as f:
+        json.dump(config_json, f, indent=2)
+    print(f"\nConfig saved to: {config_json_path}")
+
+    # 9. Create data loaders
     train_loader = DataLoader(
         TensorDataset(torch.FloatTensor(X_train), torch.LongTensor(y_train)),
         batch_size=BATCH_SIZE, shuffle=True,
@@ -545,18 +619,17 @@ if __name__ == "__main__":
         batch_size=BATCH_SIZE,
     )
 
-    # 9. Train
+    # 10. Train
     history = train_model(model, train_loader, val_loader, EPOCHS)
 
-    # 10. Predict function
+    # 11. Predict function
     def predict_fn(X):
         model.eval()
         with torch.no_grad():
             return model(torch.FloatTensor(X).to(device)).cpu().numpy()
 
-    # 11. Save model
-    model_path = os.path.join(SCRIPT_DIR, 'element_transformer_model.pt')
-    torch.save({
+    # 12. Save final model checkpoints
+    checkpoint_data = {
         'model_state_dict': model.state_dict(),
         'elements': synth_elements,
         'wavelength_binned': binned_wl,
@@ -573,14 +646,22 @@ if __name__ == "__main__":
             'max_seq_len': seq_len,
             'dropout': DROPOUT,
         }
-    }, model_path)
+    }
+
+    model_path = os.path.join(SCRIPT_DIR, 'element_transformer_model.pt')
+    torch.save(checkpoint_data, model_path)
     print(f"\nModel saved to: {model_path}")
 
-    # 12. Evaluate
+    # Save full checkpoint to experiment folder (used by predict_nn.py)
+    best_model_path = os.path.join(DATA_PATH, "best_model.pt")
+    torch.save(checkpoint_data, best_model_path)
+    print(f"Checkpoint saved to: {best_model_path}")
+
+    # 13. Evaluate
     predictions = evaluate_model(predict_fn, X_test, y_test, synth_elements)
     print_sample_predictions(predict_fn, X_test, y_test, synth_elements)
 
-    # 13. Summary
+    # 14. Summary
     print("\n" + "=" * 80)
     print("TRAINING SUMMARY")
     print("=" * 80)

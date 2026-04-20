@@ -1,4 +1,15 @@
+# Ignore large data files
 element_weights/multi_weights_vacuum.h5
 element_weights/multi_weights.h5
 synthetic_data.h5
 synthetic_spectra.npy
+
+# Ignore Python cache files
+__pycache__
+
+# experiments and mlruns directories for MLflow
+mlruns
+experiments
+
+# CACHE syntetic data
+Data/synthetic_*.h5
